@@ -1,0 +1,134 @@
+; SPDX-License-Identifier: GPL-3.0-only
+; Licensed under the GNU General Public License, version 3 only.
+; Provided without warranty. See LICENSE for the license text.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Net
+ClassGuid   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+CatalogFile = ap6256.cat
+
+DriverVer   = 01/01/1999,1.0.0.0
+PnpLockdown = 1
+
+[Manufacturer]
+%ManufacturerName% = Standard, NTARM64.10.0...26100
+
+[Standard.NTARM64.10.0...26100]
+%AP6256.DeviceDesc% = AP6256.Install, SD\VID_02D0&PID_A9BF&FN_1
+
+[AP6256.Install]
+Characteristics = 0x84
+NumberOfNetworkInterfaces = 3
+BusType         = 15
+*IfType         = 71
+*MediaType      = 16
+*PhysicalMediaType = 9
+*IfConnectorPresent = 1
+CopyFiles       = AP6256.CopyFiles
+AddReg          = AP6256.NdisReg, AP6256.Params.reg
+
+[AP6256.Params.reg]
+
+HKR,, DongleImagePath, 0, "%13%\4345r9rtecdc.bin"
+HKR,, SROMImagePath,   0, "%13%\4345r9nvram.txt"
+HKR,, ClmImagePath,    0, "%13%\4345r9.clmb"
+HKR,, BTCoexist,       0, "3"
+
+HKR,, PowerSaveMode, 0x00000002, "2"
+
+HKR,, DebugLogLevel, 0x00000002, "0"
+
+[AP6256.Install.Services]
+AddService = ap6256, 2, AP6256.Service, AP6256.EventLog
+
+[AP6256.Install.Wdf]
+KmdfService = ap6256, AP6256.Wdf
+
+[AP6256.Wdf]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[AP6256.Service]
+DisplayName    = %AP6256.ServiceDesc%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %13%\ap6256.sys
+LoadOrderGroup = NDIS
+
+[AP6256.EventLog]
+AddReg = AP6256.EventLog.AddReg
+
+[AP6256.EventLog.AddReg]
+HKR,, EventMessageFile, 0x00020000, "%%SystemRoot%%\System32\netevent.dll"
+HKR,, TypesSupported,   0x00010001, 7
+
+[AP6256.NdisReg]
+HKR, Ndi, Service, 0, "ap6256"
+HKR, Ndi\Interfaces, UpperRange, 0, "ndis5"
+
+HKR, Ndi\Interfaces, LowerRange, 0, "ethernet,wlan"
+HKR, Ndi\params\BTCoexist, ParamDesc, 0, %BlueToothCollaboration%
+HKR, Ndi\params\BTCoexist, type, 0, "enum"
+HKR, Ndi\params\BTCoexist\enum, "0", 0, %Disable%
+HKR, Ndi\params\BTCoexist\enum, "1", 0, %Enable%
+HKR, Ndi\params\BTCoexist\enum, "3", 0, %Auto%
+HKR, Ndi\params\BTCoexist, default, 0, "3"
+
+HKR, Ndi\params\PowerSaveMode, ParamDesc, 0, %PowerSaveLevel%
+HKR, Ndi\params\PowerSaveMode, type, 0, "enum"
+HKR, Ndi\params\PowerSaveMode, default, 0, "2"
+HKR, Ndi\params\PowerSaveMode, Optional, 0, "0"
+HKR, Ndi\params\PowerSaveMode\enum, "0", 0, %PowerSaveDisabled%
+HKR, Ndi\params\PowerSaveMode\enum, "1", 0, %PowerSaveMaximum%
+HKR, Ndi\params\PowerSaveMode\enum, "2", 0, %PowerSaveFast%
+
+HKR, Ndi\params\DebugLogLevel, ParamDesc, 0, %DebugLogLevel%
+HKR, Ndi\params\DebugLogLevel, type, 0, "enum"
+HKR, Ndi\params\DebugLogLevel, default, 0, "0"
+HKR, Ndi\params\DebugLogLevel, Optional, 0, "0"
+HKR, Ndi\params\DebugLogLevel\enum, "0", 0, %DebugLogDisabled%
+HKR, Ndi\params\DebugLogLevel\enum, "1", 0, %DebugLogErrors%
+HKR, Ndi\params\DebugLogLevel\enum, "2", 0, %DebugLogWarnings%
+HKR, Ndi\params\DebugLogLevel\enum, "3", 0, %DebugLogInformation%
+HKR, Ndi\params\DebugLogLevel\enum, "4", 0, %DebugLogVerbose%
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+ap6256.sys = 1,,
+4345r9rtecdc.bin = 1,,
+4345r9nvram.txt  = 1,,
+4345r9.clmb      = 1,,
+
+[DestinationDirs]
+AP6256.CopyFiles = 13
+
+[AP6256.CopyFiles]
+ap6256.sys
+4345r9rtecdc.bin
+4345r9nvram.txt
+4345r9.clmb
+
+[Strings]
+ProviderName       = "Rubik Pi 3 WoA Project"
+ManufacturerName   = "SparkLAN / AMPAK (BCM43456)"
+DiskName           = "AP6256 Driver Installation Disk"
+AP6256.DeviceDesc  = "SparkLAN AP6256 802.11ac Wireless Adapter (SDIO)"
+AP6256.ServiceDesc = "AP6256 WiFi SDIO Driver"
+BlueToothCollaboration = "Bluetooth Collaboration"
+PowerSaveLevel     = "Power Save Level"
+PowerSaveDisabled  = "Disabled (maximum performance)"
+PowerSaveMaximum   = "Maximum power saving"
+PowerSaveFast      = "Fast power saving (default)"
+DebugLogLevel      = "Log Level"
+DebugLogDisabled   = "Disabled (default)"
+DebugLogErrors     = "Errors"
+DebugLogWarnings   = "Warnings"
+DebugLogInformation = "Information"
+DebugLogVerbose    = "Verbose"
+Disable            = "Disable"
+Enable             = "Enable"
+Auto               = "Auto"

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Licensed under the GNU General Public License, version 3 only.
+# Provided without warranty. See LICENSE for the license text.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: nuget
+    directory: /.github/scripts
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      windows-driver-kit:
+        patterns:
+          - Microsoft.Windows.WDK.*
+          - Microsoft.Windows.SDK.*
+    ignore:
+      - dependency-name: Microsoft.Windows.*
+        versions:
+          - "[10.0.26101,)"
+

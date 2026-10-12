@@ -1,0 +1,25 @@
+SPDX-License-Identifier: GPL-3.0-only
+Licensed under the GNU General Public License, version 3 only.
+Provided without warranty. See LICENSE for the license text.
+
+AP6256 Bluetooth combination permission
+
+This additional permission applies only to project-authored GPL-3.0-only
+materials in bt/. It does not change the license of the MS-PL files listed
+in NOTICE.txt.
+
+The copyright holders of those GPL-covered materials permit their compilation,
+linking and distribution together with the MS-PL files listed in NOTICE.txt,
+including modifications that retain those files' MS-PL license, as the AP6256
+Bluetooth driver. This permission covers distribution of both source and
+compiled forms of that combination.
+
+The GPL-covered materials remain subject to GPL-3.0-only. The MS-PL materials
+remain subject to MS-PL, including their notice requirements. When distributing
+the compiled combination, provide the corresponding source for both parts as
+required by the GPL. This permission does not authorize relicensing the MS-PL
+materials or removing their required notices.
+
+This is an additional permission under section 7 of GPL version 3. It grants
+no exception for combining these materials with other GPL-incompatible code.
+Recipients may remove this additional permission from their modified versions.

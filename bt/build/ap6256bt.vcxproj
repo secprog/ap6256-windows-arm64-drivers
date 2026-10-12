@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-License-Identifier: GPL-3.0-only
+Licensed under the GNU General Public License, version 3 only.
+Provided without warranty. See LICENSE for the license text.
+Additional permission: see BLUETOOTH-LINKING-EXCEPTION.txt.
+-->
+
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|ARM64"><Configuration>Release</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64"><Configuration>Debug</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <Ap6256BuildVersion Condition="'$(Ap6256BuildVersion)'==''">1.0.0.0</Ap6256BuildVersion>
+    <ProjectGuid>{A6256B70-4345-4C00-B7A2-56B7A2EA6001}</ProjectGuid>
+    <RootNamespace>ap6256bt</RootNamespace>
+    <TargetName>ap6256bt</TargetName>
+    <TargetVersion>Windows10</TargetVersion>
+    <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">ARM64</Platform>
+    <Inf2CatWindowsVersionList>10_RS3_ARM64</Inf2CatWindowsVersionList>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverType>KMDF</DriverType>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
+    <RunCodeAnalysis>true</RunCodeAnalysis>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <SpectreMitigation>false</SpectreMitigation>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>POOL_NX_OPTIN=1;RESHUB_USE_HELPER_ROUTINES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <ExceptionHandling></ExceptionHandling>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>RESHUB_USE_HELPER_ROUTINES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>ntstrsafe.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Inf>
+      <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
+      <DateStamp>*</DateStamp>
+      <SpecifyDriverVerDirectiveVersion>true</SpecifyDriverVerDirectiveVersion>
+      <TimeStamp>$(Ap6256BuildVersion)</TimeStamp>
+      <SpecifyArchitecture>true</SpecifyArchitecture>
+      <Architecture>arm64</Architecture>
+    </Inf>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\driver.c;..\src\Fdo.c;..\src\io.c;..\src\pdo.c;..\src\device.c">
+      <WppEnabled>true</WppEnabled>
+      <WppKernelMode>true</WppKernelMode>
+      <WppTraceFunction>DoTrace(LEVEL,FLAG,(MSG,...))</WppTraceFunction>
+    </ClCompile>
+    <ResourceCompile Include="..\src\driver.rc" />
+    <Inf Include="..\inf\ap6256bt.inf" />
+    <FilesToPackage Include="$(TargetPath)" Condition="'$(ConfigurationType)'=='Driver'" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\driver.h;..\src\Io.h;..\src\public.h;..\src\device.h;..\src\Debugdef.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="Ap6256BtStagePackage" AfterTargets="DriverPackageTarget" BeforeTargets="Inf2Cat" Condition="'$(Ap6256PackageFirmware)'=='true'">
+    <Error Condition="'$(Ap6256FirmwareRoot)'==''" Text="Set Ap6256FirmwareRoot to an external firmware directory." />
+    <MakeDir Directories="$(OutDir)$(TargetName)\" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(OutDir)$(TargetName)\" SkipUnchangedFiles="false" />
+    <Copy SourceFiles="$(Ap6256FirmwareRoot)\BCM4345C5.hcd" DestinationFolder="$(OutDir)$(TargetName)\" SkipUnchangedFiles="false" />
+  </Target>
+  <ItemDefinitionGroup Condition="'$(Ap6256UseBuildVersion)'=='true'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(Ap6256BuildMetadataDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>AP6256_BUILD_VERSION_GENERATED=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(Ap6256BuildMetadataDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>AP6256_BUILD_VERSION_GENERATED=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+</Project>

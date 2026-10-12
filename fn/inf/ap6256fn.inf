@@ -1,0 +1,59 @@
+; SPDX-License-Identifier: GPL-3.0-only
+; Licensed under the GNU General Public License, version 3 only.
+; Provided without warranty. See LICENSE for the license text.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+CatalogFile = ap6256fn.cat
+
+DriverVer   = 01/01/1999,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+ap6256fn.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = Standard, NTARM64.10.0...16299
+
+[Standard.NTARM64.10.0...16299]
+%AP6256FN.DeviceDesc% = AP6256FN.Install, SD\VID_02D0&PID_A9BF&FN_2
+%AP6256FN.DeviceDesc% = AP6256FN.Install, SD\VID_02D0&PID_A9BF&FN_3
+
+[AP6256FN.Install]
+CopyFiles = AP6256FN.CopyFiles
+
+[AP6256FN.CopyFiles]
+ap6256fn.sys
+
+[AP6256FN.Install.Services]
+AddService = ap6256fn, 2, AP6256FN.Service
+
+[AP6256FN.Install.Wdf]
+KmdfService = ap6256fn, AP6256FN.Wdf
+
+[AP6256FN.Wdf]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[AP6256FN.Service]
+DisplayName   = %AP6256FN.ServiceDesc%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %13%\ap6256fn.sys
+LoadOrderGroup = Extended Base
+
+[Strings]
+ProviderName        = "Rubik Pi 3 WoA Project"
+ManufacturerName    = "SparkLAN / AMPAK (BCM43456)"
+DiskName            = "AP6256 Driver Installation Disk"
+AP6256FN.DeviceDesc = "SparkLAN AP6256 Auxiliary SDIO Function"
+AP6256FN.ServiceDesc = "AP6256 Auxiliary SDIO Function Driver"
