@@ -39,8 +39,8 @@ and `4345r9.clmb`. Bluetooth packaging expects `BCM4345C5.hcd`. Signing and devi
 installation are separate steps.
 
 The [Build ARM64 drivers](.github/workflows/build-drivers.yml) workflow runs on
-pushes, pull requests and manual dispatches. It uses the standard `windows-2025`
-hosted runner, which is free for public repositories. No account secrets or
+pushes, pull requests and manual dispatches. It uses the standard `windows-2022`
+hosted runner with Visual Studio 2022, which is free for public repositories. No account secrets or
 signing certificate are required. Microsoft SDK and ARM64 WDK NuGet packages
 are pinned in `.github/scripts/packages.config` to the supported 10.0.26100
 series and cached outside the checkout. All five driver
