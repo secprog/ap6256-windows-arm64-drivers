@@ -22,5 +22,5 @@ updates:
     ignore:
       - dependency-name: Microsoft.Windows.*
         versions:
-          - "[10.0.26101,)"
+          - ">= 10.0.26101"
 
