@@ -60,3 +60,8 @@ identified in NOTICE.txt retain MS-PL. See LICENSE, NOTICE.txt and
 bt/LICENSE-MS-PL.txt for the file-level license scope.
 The original Bluetooth code has the narrow combination permission described
 in BLUETOOTH-LINKING-EXCEPTION.txt.
+
+## Trademarks
+
+Broadcom, Cypress, Infineon, AMPAK, SparkLAN, Raspberry Pi, and Windows are
+trademarks of their respective owners. This is an independent project.
