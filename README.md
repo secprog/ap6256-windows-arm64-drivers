@@ -55,11 +55,16 @@ not publish a driver artifact. Dependabot checks Actions and NuGet dependencies
 weekly and groups SDK/WDK updates. The build reads package versions from the
 manifest, and a manifest change participates in source versioning.
 
-Project-authored source is licensed under GPL-3.0-only. Nine Bluetooth files
-identified in NOTICE.txt retain MS-PL. See LICENSE, NOTICE.txt and
-bt/LICENSE-MS-PL.txt for the file-level license scope.
-The original Bluetooth code has the narrow combination permission described
-in BLUETOOTH-LINKING-EXCEPTION.txt.
+Project-authored source is licensed under GPL-3.0-only. Linux-derived chip
+routines and register/firmware command definitions in `src/common/chip.c`,
+`chip.h`, `chipregs.h` and `sdpcm.h` retain Broadcom's ISC notices. These mixed
+files declare `GPL-3.0-only AND ISC`; project-authored additions remain GPL.
+Nine Bluetooth files identified in [NOTICE.txt](NOTICE.txt) retain MS-PL.
+See [LICENSE](LICENSE), [LICENSE-ISC.txt](LICENSE-ISC.txt), NOTICE.txt and
+[bt/LICENSE-MS-PL.txt](bt/LICENSE-MS-PL.txt) for the license scope and provenance.
+The original Bluetooth code and its generated build metadata have the narrow
+combination permission described in
+[BLUETOOTH-LINKING-EXCEPTION.txt](BLUETOOTH-LINKING-EXCEPTION.txt).
 
 ## Trademarks
 

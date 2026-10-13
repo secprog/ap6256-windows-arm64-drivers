@@ -50,7 +50,7 @@ foreach ($driver in @('wdi', 'wificx', 'diagnostic', 'fn', 'bt')) {
         $manifest += (Get-FileHash -LiteralPath $artifactFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $driver + '/' + $artifactFile.Name
     }
 }
-foreach ($licenseFile in @('LICENSE', 'NOTICE.txt', 'BLUETOOTH-LINKING-EXCEPTION.txt', 'bt/LICENSE-MS-PL.txt')) {
+foreach ($licenseFile in @('LICENSE', 'LICENSE-ISC.txt', 'NOTICE.txt', 'BLUETOOTH-LINKING-EXCEPTION.txt', 'bt/LICENSE-MS-PL.txt')) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot $licenseFile) -Destination $artifactRoot
 }
 $gitRoot = & git -C $sourceRoot rev-parse --show-toplevel

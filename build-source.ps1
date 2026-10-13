@@ -143,6 +143,9 @@ try {
     }
     $generatedHeader = New-Object Text.StringBuilder
     [void]$generatedHeader.AppendLine('/* SPDX-License-Identifier: GPL-3.0-only */')
+    if ($Driver -eq 'bt') {
+        [void]$generatedHeader.AppendLine('/* Additional permission: see BLUETOOTH-LINKING-EXCEPTION.txt. */')
+    }
     [void]$generatedHeader.AppendLine('#ifndef AP6256_GENERATED_BUILD_VERSION_H')
     [void]$generatedHeader.AppendLine('#define AP6256_GENERATED_BUILD_VERSION_H')
     foreach ($versionPrefix in @('AP6256', 'AP6256FN', 'AP6256BT')) {
