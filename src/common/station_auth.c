@@ -284,6 +284,36 @@ static BOOLEAN Ap6256HostCipherAssociationRsn(const AP6256_CONNECT_PARAMS* Param
         Ap6256HostCipherRsnMatch(&response, Params->HostCipherAkm, (UINT32)Params->Mfp, 0));
 }
 
+static BOOLEAN Ap6256Wpa3EnterpriseAssociationRsn(const AP6256_CONNECT_PARAMS* Params,
+    const AP6256_ASSOC_FRAMES* Frames, const UCHAR Bssid[6])
+{
+    AP6256_HC_RSN request, ap, response;
+    const UCHAR* p;
+    ULONG fixed = Frames->ReAssociation ? 10u : 4u, n, size;
+    BOOLEAN responseRsn = FALSE;
+    if (!Params->Wpa3Enterprise || Params->HostCipher || Params->HostFips || Params->FastTransition ||
+        !Frames->AssocRequest || Frames->AssocRequestLength < fixed || Frames->AssocRequestLength > AP6256_HC_MAX_FRAME ||
+        !Frames->Beacon || Frames->BeaconLength < 12 || Frames->BeaconLength > AP6256_HC_MAX_FRAME ||
+        !RtlEqualMemory(Frames->BeaconBssid, Bssid, 6) ||
+        !Frames->AssocResponse || Frames->AssocResponseLength < 6 || Frames->AssocResponseLength > AP6256_HC_MAX_FRAME ||
+        Frames->AssocResponse[2] || Frames->AssocResponse[3] ||
+        (Frames->PeerStatusValid && Frames->PeerStatusCode) ||
+        !Ap6256HostCipherRsnRead(Frames->AssocRequest + fixed, Frames->AssocRequestLength - fixed, &request) ||
+        !Ap6256Wpa3EnterpriseRsnMatch(&request, 1) ||
+        !Ap6256HostCipherRsnRead(Frames->Beacon + 12, Frames->BeaconLength - 12, &ap) ||
+        !Ap6256Wpa3EnterpriseRsnMatch(&ap, 0) ||
+        (Params->PmkidValid ? !Ap6256HostCipherRsnPmkid(&request, Params->Pmkid, 1) : request.PmkidCount != 0))
+        return FALSE;
+    p = Frames->AssocResponse + 6; n = Frames->AssocResponseLength - 6;
+    while (n) {
+        if (n < 2 || (size = (ULONG)p[1] + 2) > n) return FALSE;
+        if (p[0] == 48) responseRsn = TRUE;
+        p += size; n -= size;
+    }
+    return !responseRsn || (Ap6256HostCipherRsnRead(Frames->AssocResponse + 6,
+        Frames->AssocResponseLength - 6, &response) && Ap6256Wpa3EnterpriseRsnMatch(&response, 0));
+}
+
 static NTSTATUS Ap6256StationAssociationDisconnect(PAP6256_WIFI Wifi, BOOLEAN HostCipher)
 {
     if (HostCipher) {
@@ -419,6 +449,13 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
                 Success = FALSE;
             }
         }
+        if (Success && authAlgorithm == WDI_AUTH_ALGO_WPA3_ENT && !hostCipher &&
+            (Wifi->ConnectCandidateIndex >= Wifi->ConnectCandidateCount ||
+             !Ap6256Wpa3EnterpriseAssociationRsn(&Wifi->ConnectCandidates[Wifi->ConnectCandidateIndex], &frames, bssid))) {
+            TraceDiag("WPA3 Enterprise: association rejected without AKM-5/CCMP/required-PMF evidence\n");
+            (VOID)Ap6256StationAssociationDisconnect(Wifi, FALSE);
+            Success = FALSE;
+        }
         if (Success && hostCipher) {
             const AP6256_CONNECT_PARAMS* candidate = &Wifi->ConnectCandidates[Wifi->ConnectCandidateIndex];
             if (candidate->Mfp != Ap6256MfpNone)
@@ -427,7 +464,8 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
             BOOLEAN pmf = FALSE;
             NTSTATUS pmfStatus = Ap6256WifiAssocPmf(&frames, bssid, &pmf);
             if (!NT_SUCCESS(pmfStatus) ||
-                ((authAlgorithm == WDI_AUTH_ALGO_WPA3_SAE || authAlgorithm == WDI_AUTH_ALGO_OWE) &&
+                ((authAlgorithm == WDI_AUTH_ALGO_WPA3_SAE || authAlgorithm == WDI_AUTH_ALGO_OWE ||
+                  authAlgorithm == WDI_AUTH_ALGO_WPA3_ENT) &&
                  !pmf)) {
                 TraceWarn(TRACE_NETADAPTER,
                           "association rejected: PMF negotiation evidence unavailable or "

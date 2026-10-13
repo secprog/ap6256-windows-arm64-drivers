@@ -73,6 +73,21 @@ int Ap6256HostCipherRsnMatch(const AP6256_HC_RSN* Rsn, U32 Akm, U32 Mfp, int Sta
     for (i = 0; i < Rsn->AkmCount; ++i) akm |= HcRsnSuite(Rsn->Akms + 4 * i, Akm);
     return pair && akm;
 }
+int Ap6256Wpa3EnterpriseRsnMatch(const AP6256_HC_RSN* Rsn, int Station)
+{
+    U32 i, pair = 0, akm = 0;
+    if (!Rsn || Station < 0 || Station > 1 || Rsn->Group != 0x04ac0f00u ||
+        Rsn->Management != 0x06ac0f00u || !(Rsn->Capabilities & 0x80u) ||
+        !Rsn->Pairwise || !Rsn->Akms || !Rsn->PairwiseCount ||
+        Rsn->PairwiseCount > 63 || !Rsn->AkmCount || Rsn->AkmCount > 63 ||
+        (Station && (Rsn->PairwiseCount != 1 || Rsn->AkmCount != 1 ||
+                     (Rsn->Capabilities & 0xc0u) != 0xc0u ||
+                     (Rsn->Capabilities & 0x0400u)))) return 0;
+    for (i = 0; i < Rsn->PairwiseCount; ++i) pair |= HcRsnSuite(Rsn->Pairwise + 4 * i, 4);
+    for (i = 0; i < Rsn->AkmCount; ++i) akm |= HcRsnSuite(Rsn->Akms + 4 * i, 5);
+    return pair && akm;
+}
+
 int Ap6256HostCipherRsnPmkid(const AP6256_HC_RSN* Rsn, const U8 Pmkid[16], int Station)
 {
     U32 i, j, different;

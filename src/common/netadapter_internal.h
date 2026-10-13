@@ -100,6 +100,51 @@ static inline NTSTATUS Ap6256CopyHostCipherCandidate(const WDI_CONNECT_BSS_ENTRY
     return STATUS_SUCCESS;
 }
 
+static inline BOOLEAN Ap6256Wpa3EnterpriseRequestSuite(const WDI_CONNECT_PARAMETERS_CONTAINER* Params)
+{
+    ULONG i;
+    BOOLEAN present;
+    if (Params->Optional.RsnaAkmSuites_IsPresent) {
+        present = FALSE;
+        if (!Params->RsnaAkmSuites.pElements) return FALSE;
+        for (i = 0; i < Params->RsnaAkmSuites.ElementCount; ++i)
+            if ((UINT32)Params->RsnaAkmSuites.pElements[i] == 0x05ac0f00u) present = TRUE;
+        if (!present) return FALSE;
+    }
+    if (Params->Optional.RsnaAkmCipherSuites_IsPresent) {
+        present = FALSE;
+        if (!Params->RsnaAkmCipherSuites.pElements) return FALSE;
+        for (i = 0; i < Params->RsnaAkmCipherSuites.ElementCount; ++i)
+            if ((UINT32)Params->RsnaAkmCipherSuites.pElements[i].akm == 0x05ac0f00u &&
+                (UINT32)Params->RsnaAkmCipherSuites.pElements[i].cipher == 0x04ac0f00u) present = TRUE;
+        if (!present) return FALSE;
+    }
+    return TRUE;
+}
+
+static inline NTSTATUS Ap6256CopyWpa3EnterpriseCandidate(const WDI_CONNECT_BSS_ENTRY_CONTAINER* Bss,
+    AP6256_CONNECT_PARAMS* Params)
+{
+    const UCHAR* frames[2];
+    ULONG lengths[2], i;
+    AP6256_HC_RSN rsn;
+    if (!Params->Wpa3Enterprise) return STATUS_SUCCESS;
+    if (Params->FastTransition || Params->HostFips || Params->HostCipher) return STATUS_NOT_SUPPORTED;
+    frames[0] = Bss->Optional.BeaconFrame_IsPresent ? Bss->BeaconFrame.pElements : NULL;
+    frames[1] = Bss->Optional.ProbeResponseFrame_IsPresent ? Bss->ProbeResponseFrame.pElements : NULL;
+    lengths[0] = Bss->Optional.BeaconFrame_IsPresent ? Bss->BeaconFrame.ElementCount : 0;
+    lengths[1] = Bss->Optional.ProbeResponseFrame_IsPresent ? Bss->ProbeResponseFrame.ElementCount : 0;
+    for (i = 0; i < 2; ++i)
+        if ((i ? Bss->Optional.ProbeResponseFrame_IsPresent : Bss->Optional.BeaconFrame_IsPresent) &&
+            (!frames[i] || lengths[i] < 12 ||
+             !Ap6256HostCipherRsnRead(frames[i] + 12, lengths[i] - 12, &rsn) ||
+             !Ap6256Wpa3EnterpriseRsnMatch(&rsn, 0))) return STATUS_NOT_SUPPORTED;
+    return Ap6256SaeCopyPmkid((BOOLEAN)(Bss->Optional.PMKID_IsPresent != 0),
+        Bss->Optional.PMKID_IsPresent ? Bss->PMKID.pElements : NULL,
+        Bss->Optional.PMKID_IsPresent ? Bss->PMKID.ElementCount : 0,
+        Params->Pmkid, &Params->PmkidValid);
+}
+
 #define AP6256_WDI_TLV_IHV_DATA 189u
 
 #define AP6256_WDI_FILTER_SUPPORTED 0x03FF002Fu
@@ -495,6 +540,7 @@ PCSTR Ap6256ConnectBssRejection(_In_ PAP6256_WIFI Wifi,
                                                                     _In_ ULONG Channel);
 UINT16 Ap6256ConnectCompletionId(_In_ PAP6256_WIFI Wifi);
 BOOLEAN Ap6256HostCipherAvailable(_In_ PAP6256_WIFI Wifi);
+BOOLEAN Ap6256Wpa3EnterpriseAvailable(_In_ PAP6256_WIFI Wifi);
 ULONG Ap6256CopyAlgoPairs(_In_ PAP6256_WIFI Wifi, _In_reads_(Total) const WDI_ALGO_PAIRS* Source,
                           _In_ ULONG Total, _Out_writes_(Total) WDI_ALGO_PAIRS* Destination);
 _IRQL_requires_max_(PASSIVE_LEVEL)

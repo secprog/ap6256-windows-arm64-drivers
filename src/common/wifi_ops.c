@@ -36,6 +36,7 @@
 #define WPA_AUTH_DISABLED           0x0000
 #define WPA2_AUTH_UNSPECIFIED       0x0040
 #define WPA2_AUTH_PSK               0x0080
+#define WPA2_AUTH_1X_SHA256         0x1000
 
 #define AP6256_BTCOEX_DISABLED       0u
 #define AP6256_BTCOEX_ENABLED        1u
@@ -1794,6 +1795,30 @@ static NTSTATUS Ap6256WifiPrepareHostCipherOffloads(PAP6256_DEVICE_CONTEXT Ctx)
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
+static NTSTATUS Ap6256WifiSetStationRsn(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_ PAP6256_CONNECT_PARAMS Params)
+{
+
+    UCHAR ie[44] = {48, 26, 1, 0, 0, 15, 172, 4, 1, 0, 0, 15, 172, 4,
+        1, 0, 0, 15, 172, 5, 0xc0, 0, 0, 0, 0, 15, 172, 6};
+    ULONG length = Params->Wpa3Enterprise ? 28u : 0u;
+    AP6256_BCDC_QUERY_RESULT result = {0};
+    NTSTATUS status;
+    if (Ctx->Chip.ChipId != 0x4345 || Ctx->Chip.ChipRev != 9) return STATUS_SUCCESS;
+    if (Params->Wpa3Enterprise && Params->PmkidValid) {
+        ie[1] = 42; ie[22] = 1;
+        RtlCopyMemory(ie + 24, Params->Pmkid, 16);
+        ie[40] = 0; ie[41] = 15; ie[42] = 172; ie[43] = 6;
+        length = sizeof(ie);
+    }
+    status = Ap6256BcdcSetIovarResultIf(Ctx, 0, "wpaie", ie, length, &result);
+    if (!NT_SUCCESS(status)) return status;
+    if (!result.FirmwareReply || result.FirmwareError || result.FirmwareStatus)
+        return STATUS_DEVICE_PROTOCOL_ERROR;
+    return STATUS_SUCCESS;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
 static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     _In_ PAP6256_CONNECT_PARAMS Params, _In_opt_ AP6256_CONNECT_FT_SETUP* Ft)
 {
@@ -1807,10 +1832,11 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     BOOLEAN hadFips = Ap6256FipsActive(Ctx, 0);
     BOOLEAN hostCipher = Params->HostCipher;
     BOOLEAN hadHostCipher = Ap6256HostCipherPacketActive(Ctx, 0);
-    UINT32 wsec = (wpa2 ? WSEC_AES_ENABLED : 0) | (owe ? WSEC_SHA256_KDF : 0);
+    UINT32 wsec = (wpa2 ? WSEC_AES_ENABLED : 0) | ((owe || Params->Wpa3Enterprise) ? WSEC_SHA256_KDF : 0);
     UINT32 wpaAuth = sae ? (privateSae ? 0x00008000u : 0x00040000u) :
         (Params->Security == Ap6256SecurityWpa2Enterprise
-        ? WPA2_AUTH_UNSPECIFIED : (wpa2 ? WPA2_AUTH_PSK : WPA_AUTH_DISABLED));
+        ? (Params->Wpa3Enterprise ? WPA2_AUTH_1X_SHA256 : WPA2_AUTH_UNSPECIFIED)
+        : (wpa2 ? WPA2_AUTH_PSK : WPA_AUTH_DISABLED));
     UINT32 auth = sae && !privateSae && !Params->PmkidValid ? 3u : 0u;
     BRCMF_JOIN_PARAMS join;
     ULONG joinLen;
@@ -1824,6 +1850,12 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         Params->Security != Ap6256SecurityWpa2Enterprise && !sae && !owe) {
         return STATUS_NOT_SUPPORTED;
     }
+    if (Params->Wpa3Enterprise &&
+        (Params->Wpa3Enterprise != TRUE || Params->Security != Ap6256SecurityWpa2Enterprise ||
+         Params->HostCipher || Params->HostFips || Ft || Params->FastTransition ||
+         Params->Mfp != Ap6256MfpRequired || !Params->BssidValid || !Params->Channel || Params->Channel > 196 ||
+         !Ctx->FirmwareMfpSupported || Ctx->Chip.ChipId != 0x4345 || Ctx->Chip.ChipRev != 9))
+        return STATUS_NOT_SUPPORTED;
     if (hostCipher && (hostCipher != TRUE || Params->HostFips || Ft ||
         Params->FastTransition || !Params->BssidValid || !Params->Channel || Params->Channel > 196 ||
         (UINT32)Params->Mfp > 2 ||
@@ -1869,6 +1901,8 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (!NT_SUCCESS(status)) return status;
     status = Ap6256FipsStop(Ctx, 0);
     if (!NT_SUCCESS(status)) return status;
+    status = Ap6256WifiSetStationRsn(Ctx, Params);
+    if (!NT_SUCCESS(status)) return status;
     if (hostCipher) {
         status = Ap6256WifiPrepareHostCipherOffloads(Ctx);
         if (!NT_SUCCESS(status)) return status;
@@ -1896,7 +1930,7 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     {
         UINT32 mfp = (UINT32)Params->Mfp;
         NTSTATUS mfpStatus = Ap6256BcdcSetIovar(Ctx, "mfp", &mfp, sizeof(mfp));
-        if ((sae || owe || Ft || Params->HostFips || hostCipher) && !NT_SUCCESS(mfpStatus)) return mfpStatus;
+        if ((sae || owe || Ft || Params->HostFips || hostCipher || Params->Wpa3Enterprise) && !NT_SUCCESS(mfpStatus)) return mfpStatus;
 
         if (NT_SUCCESS(Ap6256WifiSetMfpWsecBit(Ctx,
                                                (BOOLEAN)(mfp != 0))) &&
@@ -1917,6 +1951,7 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     status = Ap6256BcdcSetDcmd(Ctx, BRCMF_C_SET_INFRA, &infra, sizeof(infra));
     if (!NT_SUCCESS(status)) return status;
     } else if (Params->Mfp != Ap6256MfpNone) wsec |= WSEC_MFP_CAPABLE;
+    if (Params->Wpa3Enterprise) wsec |= WSEC_MFP_REQUIRED;
     if (sae) {
         if (privateSae) {
             status = Ap6256SaeSetBip(Ctx);
@@ -1945,7 +1980,7 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         if (!NT_SUCCESS(status)) return status;
     }
 
-    if (hostCipher && !sae && !owe) {
+    if ((hostCipher && !sae && !owe) || Params->Wpa3Enterprise) {
         if (Params->Mfp != Ap6256MfpNone) {
 
             const UCHAR selector[] = {0, 15, 172, 6};
@@ -1970,7 +2005,7 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (Params->HostFips) {
         status = Ap6256FipsVerifySecurity(Ctx, 0, wsec, wpaAuth);
         if (!NT_SUCCESS(status)) return status;
-    } else if (hostCipher) {
+    } else if (hostCipher || Params->Wpa3Enterprise) {
         const UINT32 commands[] = {BRCMF_C_GET_AUTH, BRCMF_C_GET_WPA_AUTH,
             BRCMF_C_GET_WSEC, BRCMF_C_GET_INFRA};
         const UINT32 expected[] = {auth, wpaAuth, wsec, infra};

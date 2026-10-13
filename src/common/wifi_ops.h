@@ -58,6 +58,8 @@ typedef struct _AP6256_CONNECT_PARAMS {
     BOOLEAN         HostFips, HostFipsHt;
 
     BOOLEAN         HostCipher;
+
+    BOOLEAN         Wpa3Enterprise;
     BOOLEAN         ExcludeUnencrypted;
     UINT32          HostCipherAkm;
 

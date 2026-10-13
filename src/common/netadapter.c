@@ -343,6 +343,9 @@ NTSTATUS Ap6256BuildGtkOffload(PAP6256_WIFI Wifi,
         Offload->DescriptorVersion = 0; Offload->MicKind = 3;
     } else if (Wifi->AuthAlgorithm == WDI_AUTH_ALGO_OWE) {
         Offload->DescriptorVersion = 0; Offload->MicKind = 2;
+    } else if (Wifi->AuthAlgorithm == WDI_AUTH_ALGO_WPA3_ENT) {
+        if (!Offload->Pmf) return STATUS_NOT_SUPPORTED;
+        Offload->DescriptorVersion = 3; Offload->MicKind = 3;
     } else if (Wifi->AuthAlgorithm == WDI_AUTH_ALGO_RSNA && Wifi->Auth.Ft.MobilityDomainValid) {
         Offload->DescriptorVersion = 3; Offload->MicKind = 3;
     } else if (Wifi->AuthAlgorithm == WDI_AUTH_ALGO_RSNA || Wifi->AuthAlgorithm == WDI_AUTH_ALGO_RSNA_PSK) {
@@ -2016,12 +2019,23 @@ BOOLEAN Ap6256HostCipherAvailable(_In_ PAP6256_WIFI Wifi)
         InterlockedCompareExchange(&ctx->HostCipherStore.Ready, 0, 0) == 1;
 }
 
+BOOLEAN Ap6256Wpa3EnterpriseAvailable(_In_ PAP6256_WIFI Wifi)
+{
+
+    return Wifi->Ctx->Chip.ChipId == 0x4345 && Wifi->Ctx->Chip.ChipRev == 9 &&
+        Wifi->Ctx->FirmwareMfpSupported && Wifi->TlvContext.PeerVersion >= WDI_VERSION_1_1_9;
+}
+
 ULONG Ap6256CopyAlgoPairs(_In_ PAP6256_WIFI Wifi, _In_reads_(Total) const WDI_ALGO_PAIRS* Source,
                           _In_ ULONG Total, _Out_writes_(Total) WDI_ALGO_PAIRS* Destination)
 {
     ULONG i, count = 0;
     RtlZeroMemory(Destination, Total * sizeof(*Destination));
     for (i = 0; i < Total; ++i) {
+        if (Source[i].AuthAlgorithm == WDI_AUTH_ALGO_WPA3_ENT &&
+            (Source[i].CipherAlgorithm == WDI_CIPHER_ALGO_CCMP ||
+             Source[i].CipherAlgorithm == WDI_CIPHER_ALGO_BIP) &&
+            !Ap6256Wpa3EnterpriseAvailable(Wifi)) continue;
         if ((Source[i].CipherAlgorithm == WDI_CIPHER_ALGO_GCMP_256 ||
              Source[i].CipherAlgorithm == WDI_CIPHER_ALGO_BIP_GMAC_256) &&
             !Ap6256HostCipherAvailable(Wifi)) continue;
@@ -2432,6 +2446,7 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
     BOOLEAN open;
     BOOLEAN wpa2;
     BOOLEAN enterprise;
+    BOOLEAN wpa3Enterprise;
     BOOLEAN sae;
     BOOLEAN owe;
     WDI_AUTH_ALGORITHM hostCipherAuth = WDI_AUTH_ALGO_UNKNOWN;
@@ -2541,6 +2556,10 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
                               WDI_CIPHER_ALGO_CCMP) &&
           Ap6256CipherPresent(&parameters.ConnectParameters.MulticastCipherAlgorithms,
                               WDI_CIPHER_ALGO_CCMP);
+    wpa3Enterprise = Ap6256Wpa3EnterpriseAvailable(Wifi) &&
+        Ap6256AlgorithmPresent(&parameters.ConnectParameters.AuthenticationAlgorithms, WDI_AUTH_ALGO_WPA3_ENT) &&
+        Ap6256CipherPresent(&parameters.ConnectParameters.UnicastCipherAlgorithms, WDI_CIPHER_ALGO_CCMP) &&
+        Ap6256CipherPresent(&parameters.ConnectParameters.MulticastCipherAlgorithms, WDI_CIPHER_ALGO_CCMP);
     if (Ap6256HostCipherAvailable(Wifi) &&
         !parameters.ConnectParameters.ConnectionSettings.HostFIPSModeEnabled &&
         parameters.ConnectParameters.AuthenticationAlgorithms.pElements &&
@@ -2571,6 +2590,18 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
         }
     }
 
+    if (!connect.HostCipher &&
+        Ap6256AlgorithmPresent(&parameters.ConnectParameters.AuthenticationAlgorithms, WDI_AUTH_ALGO_WPA3_ENT)) {
+        if (!wpa3Enterprise || !parameters.ConnectParameters.ConnectionSettings.MFPEnabled ||
+            !Ap6256Wpa3EnterpriseRequestSuite(&parameters.ConnectParameters)) {
+            status = STATUS_NOT_SUPPORTED;
+            goto Complete;
+        }
+        connect.Wpa3Enterprise = TRUE;
+        enterprise = TRUE;
+        open = wpa2 = sae = owe = FALSE;
+    }
+
     if (Ap6256AlgorithmPresent(&parameters.ConnectParameters.AuthenticationAlgorithms,
                                WDI_AUTH_ALGO_OWE)) {
         if (!owe) {
@@ -2595,7 +2626,7 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
         goto Complete;
     }
 
-    connect.Mfp = (sae || owe || (connect.HostCipher &&
+    connect.Mfp = (sae || owe || connect.Wpa3Enterprise || (connect.HostCipher &&
         (connect.HostCipherAkm == 5 || connect.HostCipherAkm == 12))) ? Ap6256MfpRequired
                                : (parameters.ConnectParameters.ConnectionSettings.MFPEnabled
                                       ? Ap6256MfpCapable
@@ -2674,7 +2705,7 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
             if (candidate->Optional.FTInitialAssocParameters_IsPresent ||
                 candidate->Optional.FTReAssocParameters_IsPresent) {
                 requestedFt = TRUE;
-                if (connect.HostCipher || !enterprise || !Ap6256HostFbtAvailable(Wifi)) {
+                if (connect.HostCipher || connect.Wpa3Enterprise || !enterprise || !Ap6256HostFbtAvailable(Wifi)) {
                     status = STATUS_NOT_SUPPORTED;
                     goto Complete;
                 }
@@ -2792,6 +2823,8 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
             if (!NT_SUCCESS(status)) goto Complete;
             status = Ap6256CopyHostCipherCandidate(candidate, &candidates[candidateCount]);
             if (!NT_SUCCESS(status)) goto Complete;
+            status = Ap6256CopyWpa3EnterpriseCandidate(candidate, &candidates[candidateCount]);
+            if (!NT_SUCCESS(status)) goto Complete;
             candidates[candidateCount].BssidValid = TRUE;
             RtlCopyMemory(candidates[candidateCount].Bssid, candidate->BSSID.Address, 6);
             candidates[candidateCount++].Channel = candidate->ChannelInfo.ChannelNumber;
@@ -2802,7 +2835,7 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
         }
     }
 
-    if ((isRoam || sae || owe || requestedFt || connect.HostFips || connect.HostCipher) && candidateCount == 0) {
+    if ((isRoam || sae || owe || requestedFt || connect.HostFips || connect.HostCipher || connect.Wpa3Enterprise) && candidateCount == 0) {
 
         status = STATUS_NETWORK_UNREACHABLE;
         goto Complete;
@@ -2883,7 +2916,7 @@ static VOID Ap6256HandleConnectRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUE
 
     KeAcquireSpinLock(&Wifi->CommandLock, &oldIrql);
     Wifi->AuthAlgorithm =
-        connect.HostCipher ? hostCipherAuth : owe ? WDI_AUTH_ALGO_OWE
+        connect.HostCipher ? hostCipherAuth : connect.Wpa3Enterprise ? WDI_AUTH_ALGO_WPA3_ENT : owe ? WDI_AUTH_ALGO_OWE
             : (sae ? WDI_AUTH_ALGO_WPA3_SAE
                    : (enterprise ? WDI_AUTH_ALGO_RSNA
                                  : (wpa2 ? WDI_AUTH_ALGO_RSNA_PSK : WDI_AUTH_ALGO_80211_OPEN)));

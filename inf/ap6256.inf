@@ -44,7 +44,7 @@ HKR,, BTCoexist,       0, "3"
 
 HKR,, PowerSaveMode, 0x00000002, "2"
 
-HKR,, DebugLogLevel, 0x00000002, "0"
+HKR,, DebugLogLevel, 0x00000000, "0"
 
 [AP6256.Install.Services]
 AddService = ap6256, 2, AP6256.Service, AP6256.EventLog

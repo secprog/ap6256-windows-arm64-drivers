@@ -7,8 +7,8 @@
 #pragma once
 WDFDEVICE Device;
 BOOLEAN WifiCapabilitiesSet;
-DOT11_AUTH_CIPHER_PAIR WifiAuthCipher[11];
-DOT11_AUTH_CIPHER_PAIR WifiMgmtCipher[10];
+DOT11_AUTH_CIPHER_PAIR WifiAuthCipher[12];
+DOT11_AUTH_CIPHER_PAIR WifiMgmtCipher[11];
 PVOID WifiDirectDevice;
 UINT16 WifiStationPortId, WifiDirectPortId;
 

@@ -20,3 +20,5 @@ int Ap6256HostCipherRsnMatch(const AP6256_HC_RSN* Rsn,
     AP6256_HC_U32 Akm, AP6256_HC_U32 Mfp, int Station);
 int Ap6256HostCipherRsnPmkid(const AP6256_HC_RSN* Rsn,
     const AP6256_HC_U8 Pmkid[16], int Station);
+
+int Ap6256Wpa3EnterpriseRsnMatch(const AP6256_HC_RSN* Rsn, int Station);
