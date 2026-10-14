@@ -4059,19 +4059,15 @@ static VOID Ap6256HandleP2pSendResponseActionFrame(
         case WDI_P2P_ACTION_FRAME_PROVISION_DISCOVERY_RESPONSE: {
             const WDI_P2P_PROVISION_DISCOVERY_RESPONSE_INFO_CONTAINER* info =
                 &parameters.ProvisionDiscoveryResponseInfo;
-
-            if (!parameters.Optional.ProvisionDiscoveryResponseInfo_IsPresent) {
-                status = Ap6256NdisToNtStatus(NDIS_STATUS_INVALID_DATA);
-                break;
-            }
+        
             frame.Subtype = AP6256_P2P_AF_PROV_DISC_RSP;
 
             frame.HaveStatus = FALSE;
-            frame.GroupCapability = info->ResponseParams.GroupCapability;
-            if (info->Optional.GroupID_IsPresent) {
-                Ap6256FillP2pGroupId(&frame, &info->GroupID);
-            }
-            break;
+            if (parameters.Optional.ProvisionDiscoveryResponseInfo_IsPresent) {
+                frame.GroupCapability = info->ResponseParams.GroupCapability;
+                if (info->Optional.GroupID_IsPresent) {
+                    Ap6256FillP2pGroupId(&frame, &info->GroupID);
+                }
         }
 
         default:
