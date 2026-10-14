@@ -146,26 +146,6 @@ VOID Ap6256BcdcProcessControlFrame(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static PCSTR Ap6256BcdcFirmwareErrorName(_In_ INT32 Error)
 {
     switch (Error) {

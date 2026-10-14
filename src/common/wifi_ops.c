@@ -140,7 +140,6 @@ typedef struct _BRCMF_REASSOC_PARAMS {
 #define AP6256_SHORT_RETRY_LIMIT    7u
 #define AP6256_LONG_RETRY_LIMIT     4u
 
-
 #define BRCMF_WSEC_PASSPHRASE       0x0001
 #define BRCMF_WSEC_MAX_PSK_LEN      64
 
