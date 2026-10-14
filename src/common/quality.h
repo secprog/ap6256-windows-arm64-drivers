@@ -1,0 +1,30 @@
+#pragma once
+
+#include "ap6256.h"
+
+#define AP6256_QUALITY_AUTO_POWER_SAVE 1u
+#define AP6256_QUALITY_LOW_LATENCY 2u
+#define AP6256_QUALITY_HIGH_THROUGHPUT 3u
+#define AP6256_QUALITY_NO_POWER_SAVE 4u
+
+VOID Ap6256QualityInitialize(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256QualitySetPort(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_ UINT32 Port, _In_ UINT32 Hint);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256QualityForgetPort(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ UINT32 Port);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID Ap6256QualityResetFirmware(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID Ap6256QualityForgetGroupFirmware(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256QualityReapply(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256WifiProgramPowerSave(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_ BOOLEAN Enabled, _In_ BOOLEAN ForceOff);

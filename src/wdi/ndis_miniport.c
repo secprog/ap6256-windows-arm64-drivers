@@ -10,6 +10,7 @@
 #include "chip.h"
 #include "firmware.h"
 #include "bcdc.h"
+#include "quality.h"
 #include "datapath.h"
 #include "wifi_ops.h"
 #include "../common/netadapter.h"
@@ -107,6 +108,7 @@ Ap6256WdiAllocateAdapter(NDIS_HANDLE NdisMiniportHandle,
     KeInitializeSpinLock(&ctx->Sdio.TxStateLock);
     KeInitializeSpinLock(&ctx->HostFipsLock);
     KeInitializeMutex(&ctx->HostCipherControlLock, 0);
+    Ap6256QualityInitialize(ctx);
     {
         NTSTATUS cryptoStatus = Ap6256HostCipherStoreInit(&ctx->HostCipherStore);
         if (!NT_SUCCESS(cryptoStatus))

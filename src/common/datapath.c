@@ -585,6 +585,15 @@ static BOOLEAN Ap6256TraceTxFailure(_In_reads_bytes_(Length) const UCHAR* Data,
     return TRUE;
 }
 
+static BOOLEAN Ap6256ActionFrameIsP2pMirror(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_reads_bytes_(Length) const UCHAR* Body, _In_ ULONG Length)
+{
+    return Ctx->Chip.ChipId == 0x4345 && Ctx->Chip.ChipRev == 9 &&
+        Ctx->FirmwareNativeManagement && Body != NULL && Length >= 8 &&
+        Body[0] == 4 && Body[1] == 9 && Body[2] == 0x50 && Body[3] == 0x6f &&
+        Body[4] == 0x9a && Body[5] == 9 && Body[6] <= 8;
+}
+
 _IRQL_requires_max_(PASSIVE_LEVEL)
 static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                               _In_reads_bytes_(Length) PUCHAR Payload, _In_ ULONG Length)
@@ -795,11 +804,17 @@ static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     }
 
     case BRCMF_E_ACTION_FRAME:
+        if (Ap6256ActionFrameIsP2pMirror(Ctx, eventBody, eventBodyLen)) {
+            TraceVerbose(TRACE_NETADAPTER, "P2P raw action mirror (%u bytes); RX uses event 75\n",
+                eventBodyLen);
+            break;
+        }
+        TraceWarn(TRACE_NETADAPTER, "unclassified %s receive variant (%u bytes)\n",
+            Ap6256EventName(eventType), eventBodyLen);
+        break;
     case BRCMF_E_ACTION_FRAME_RX_NDIS:
         TraceWarn(TRACE_NETADAPTER,
-                  "%s event (%u byte(s)) - this firmware raises a spelling "
-                  "is not supported, so the body layout is unknown "
-                  "and the frame is not indicated\n",
+                  "unclassified %s receive variant (%u bytes)\n",
                   Ap6256EventName(eventType), eventBodyLen);
         break;
 

@@ -146,11 +146,53 @@ VOID Ap6256BcdcProcessControlFrame(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+static PCSTR Ap6256BcdcFirmwareErrorName(_In_ INT32 Error)
+{
+    switch (Error) {
+    case -2: return "BAD_ARGUMENT";
+    case -4: return "NOT_UP";
+    case -5: return "NOT_DOWN";
+    case -6: return "NOT_AP";
+    case -8: return "BAD_KEY_INDEX";
+    case -10: return "NOT_BAND_LOCKED";
+    case -13: return "BAD_BAND";
+    case -14: return "BUFFER_TOO_SHORT";
+    case -16: return "BUSY";
+    case -17: return "NOT_ASSOCIATED";
+    case -23: return "UNSUPPORTED";
+    case -24: return "BAD_LENGTH";
+    case -25: return "NOT_READY";
+    case -29: return "OUT_OF_RANGE";
+    default: return "FIRMWARE_ERROR";
+    }
+}
+
 _IRQL_requires_max_(PASSIVE_LEVEL)
-static NTSTATUS Ap6256BcdcDcmdWithResult(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ UINT32 Cmd, _In_ BOOLEAN Set,
+static NTSTATUS Ap6256BcdcDcmdTransaction(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ UINT32 Cmd, _In_ BOOLEAN Set,
                                _In_ UINT32 IfIndex,
                                _Inout_updates_bytes_(Length) PVOID Buffer, _In_ ULONG Length,
-                               _Out_opt_ PAP6256_BCDC_QUERY_RESULT Result)
+                               _Out_opt_ PAP6256_BCDC_QUERY_RESULT Result,
+                               _In_ BOOLEAN OptionalProbe)
 {
     NTSTATUS status;
     PUCHAR frame;
@@ -332,7 +374,14 @@ static NTSTATUS Ap6256BcdcDcmdWithResult(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ U
     }
 
     if (bcdc->Flags & BCDC_DCMD_ERROR) {
-        TraceWarn(TRACE_BCDC, "cmd %u firmware status %d\n", Cmd, (INT32)bcdc->Status);
+        if (OptionalProbe && !Set && (INT32)bcdc->Status == -23) {
+            TraceVerbose(TRACE_BCDC, "probe GET cmd %u if %u iovar '%s': %s (%d)\n", Cmd, IfIndex, Ctx->Bcdc.PendingIovar,
+                Ap6256BcdcFirmwareErrorName((INT32)bcdc->Status), (INT32)bcdc->Status);
+        } else {
+            TraceWarn(TRACE_BCDC, "%s cmd %u if %u iovar '%s': %s (%d)\n",
+                Set ? "SET" : "GET", Cmd, IfIndex, Ctx->Bcdc.PendingIovar,
+                Ap6256BcdcFirmwareErrorName((INT32)bcdc->Status), (INT32)bcdc->Status);
+        }
         status = STATUS_UNSUCCESSFUL;
         goto done;
     }
@@ -348,6 +397,15 @@ static NTSTATUS Ap6256BcdcDcmdWithResult(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ U
 done:
     Ap6256LockRelease(&Ctx->Bcdc.Lock);
     return status;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+static NTSTATUS Ap6256BcdcDcmdWithResult(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_ UINT32 Cmd, _In_ BOOLEAN Set, _In_ UINT32 IfIndex,
+    _Inout_updates_bytes_(Length) PVOID Buffer, _In_ ULONG Length,
+    _Out_opt_ PAP6256_BCDC_QUERY_RESULT Result)
+{
+    return Ap6256BcdcDcmdTransaction(Ctx, Cmd, Set, IfIndex, Buffer, Length, Result, FALSE);
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -412,10 +470,10 @@ NTSTATUS Ap6256BcdcGetIovarIf(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     return Ap6256BcdcGetIovarResultIf(Ctx, IfIndex, Name, Out, Length, NULL);
 }
 
-_Use_decl_annotations_
-NTSTATUS Ap6256BcdcGetIovarResultIf(PAP6256_DEVICE_CONTEXT Ctx,
+_IRQL_requires_max_(PASSIVE_LEVEL)
+static NTSTATUS Ap6256BcdcGetIovarInternal(PAP6256_DEVICE_CONTEXT Ctx,
     UINT32 IfIndex, PCSTR Name, PVOID Out, ULONG Length,
-    PAP6256_BCDC_QUERY_RESULT Result)
+    PAP6256_BCDC_QUERY_RESULT Result, BOOLEAN OptionalProbe)
 {
     NTSTATUS status;
     size_t nameLen;
@@ -438,13 +496,28 @@ NTSTATUS Ap6256BcdcGetIovarResultIf(PAP6256_DEVICE_CONTEXT Ctx,
     RtlCopyMemory(scratch, Name, nameLen);
     if (Length != 0) RtlCopyMemory(scratch + nameLen, Out, Length);
 
-    status = Ap6256BcdcDcmdWithResult(Ctx, BRCMF_C_GET_VAR, FALSE, IfIndex,
-                                     scratch, total, Result);
+    status = Ap6256BcdcDcmdTransaction(Ctx, BRCMF_C_GET_VAR, FALSE, IfIndex,
+                                     scratch, total, Result, OptionalProbe);
     if (NT_SUCCESS(status)) {
         RtlCopyMemory(Out, scratch, Length);
     }
     ExFreePoolWithTag(scratch, AP6256_POOL_TAG);
     return status;
+}
+
+_Use_decl_annotations_
+NTSTATUS Ap6256BcdcGetIovarResultIf(PAP6256_DEVICE_CONTEXT Ctx,
+    UINT32 IfIndex, PCSTR Name, PVOID Out, ULONG Length,
+    PAP6256_BCDC_QUERY_RESULT Result)
+{
+    return Ap6256BcdcGetIovarInternal(Ctx, IfIndex, Name, Out, Length, Result, FALSE);
+}
+
+_Use_decl_annotations_
+NTSTATUS Ap6256BcdcProbeIovar(PAP6256_DEVICE_CONTEXT Ctx, PCSTR Name,
+    PVOID Out, ULONG Length, PAP6256_BCDC_QUERY_RESULT Result)
+{
+    return Ap6256BcdcGetIovarInternal(Ctx, 0, Name, Out, Length, Result, TRUE);
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)

@@ -715,6 +715,12 @@ static VOID Ap6256EvtAdapterCleanup(WDFOBJECT Object)
         wifi->Model.Adapter = NULL;
         InterlockedCompareExchangePointer((PVOID volatile*)&ctx->NetAdapter, NULL, Object);
     }
+    {
+        NTSTATUS qualityStatus = Ap6256QualityForgetPort(ctx, role->LogicalPort);
+        if (!NT_SUCCESS(qualityStatus))
+            TraceWarn(TRACE_NETADAPTER, "deleted WiFiCx port %u quality restore failed 0x%08X\n",
+                (ULONG)role->LogicalPort, qualityStatus);
+    }
     KeAcquireSpinLock(&wifi->Model.RoleLock, &irql);
     if (wifi->Model.Roles[slot] == role) wifi->Model.Roles[slot] = NULL;
     KeReleaseSpinLock(&wifi->Model.RoleLock, irql);

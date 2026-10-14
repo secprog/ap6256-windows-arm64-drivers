@@ -8,6 +8,7 @@
 #include "public.h"
 #include "kmdf_driver.h"
 #include "bcdc.h"
+#include "quality.h"
 #include "datapath.h"
 #include "version.h"
 #include "buildstamp.h"
@@ -125,6 +126,7 @@ NTSTATUS Ap6256EvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Devic
     KeInitializeSpinLock(&ctx->Sdio.TxStateLock);
     KeInitializeSpinLock(&ctx->HostFipsLock);
     KeInitializeMutex(&ctx->HostCipherControlLock, 0);
+    Ap6256QualityInitialize(ctx);
     status = Ap6256HostCipherStoreInit(&ctx->HostCipherStore);
     if (!NT_SUCCESS(status)) {
 

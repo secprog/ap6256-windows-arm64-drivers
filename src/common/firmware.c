@@ -5,6 +5,7 @@
  */
 
 #include "firmware.h"
+#include "quality.h"
 #include "chip.h"
 #include "sdio.h"
 #include "bcdc.h"
@@ -701,6 +702,7 @@ NTSTATUS Ap6256FirmwareDownload(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     static PCWSTR nvramFallbacks[] = {
                                        AP6256_FW_NVRAM_NAME, AP6256_FW_NVRAM_NAME_CY };
 
+    Ap6256QualityResetFirmware(Ctx);
     Ctx->FirmwareState = Ap6256FwDownloading;
     Ap6256HostCipherFirmwareRetire(Ctx);
     Ap6256FipsReset(Ctx);

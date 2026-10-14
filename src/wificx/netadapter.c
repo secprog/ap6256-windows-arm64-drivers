@@ -5,6 +5,7 @@
  */
 
 #include "netadapter_internal.h"
+#include "quality.h"
 #include "../common/native_frame.inc"
 #include "host_fips.h"
 #include "host_cipher_transport.h"

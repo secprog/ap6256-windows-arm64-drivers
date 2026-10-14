@@ -6,6 +6,7 @@
 
 #include "netadapter_internal.h"
 #include "host_cipher_transport.h"
+#include "quality.h"
 #include "pm_query.inc"
 #include "power_query.inc"
 
@@ -4069,6 +4070,7 @@ static VOID Ap6256HandleP2pSendResponseActionFrame(
                     Ap6256FillP2pGroupId(&frame, &info->GroupID);
                 }
             }
+            break;
         }
 
         default:
@@ -5180,7 +5182,8 @@ Ap6256HandleClearReceiveCoalescing(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST R
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 static VOID
-Ap6256HandleSetConnectionQuality(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
+Ap6256HandleSetConnectionQuality(_In_ PAP6256_WIFI Wifi, _In_ PWDI_MESSAGE_HEADER Header,
+                                 _In_ AP6256_REQUEST Request,
                                  _In_reads_bytes_(TlvLength) const UCHAR* Tlv, _In_ ULONG TlvLength)
 {
     WDI_SET_CONNECTION_QUALITY_PARAMETERS parameters;
@@ -5190,42 +5193,26 @@ Ap6256HandleSetConnectionQuality(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Req
     status = Ap6256NdisToNtStatus(
         ParseWdiSetConnectionQuality(TlvLength, Tlv, &Wifi->TlvContext, &parameters));
 
+    if (NT_SUCCESS(status) &&
+        !((Header->PortId == AP6256_STATION_PORT && Wifi->PortCreated) ||
+          (Header->PortId == AP6256_DISCOVERY_PORT && Wifi->P2pPortCreated) ||
+          (Header->PortId == AP6256_GROUP_PORT && Wifi->Ctx->Go.Created)))
+        status = STATUS_INVALID_DEVICE_STATE;
+            if (NT_SUCCESS(status) && parameters.Quality == WDI_CONNECTION_QUALITY_LOW_LATENCY &&
+        !parameters.Optional.LowLatencyParameters_IsPresent)
+        status = Ap6256NdisToNtStatus(NDIS_STATUS_INVALID_DATA);
     if (NT_SUCCESS(status)) {
-        switch (parameters.Quality) {
-        case WDI_CONNECTION_QUALITY_AUTO_POWER_SAVE:
-            status = Ap6256WifiSetPowerSave(Wifi->Ctx, TRUE);
-            break;
-
-        case WDI_CONNECTION_QUALITY_NO_POWER_SAVE:
-            status = Ap6256WifiSetPowerSave(Wifi->Ctx, FALSE);
-            break;
-
-        case WDI_CONNECTION_QUALITY_LOW_LATENCY:
-            Wifi->RoamLinkQualityThresholdValid = FALSE;
-            if (!parameters.Optional.LowLatencyParameters_IsPresent) {
-                TraceWarn(TRACE_NETADAPTER, "connection quality LOW_LATENCY without the "
-                                            "low-latency parameters\n");
-                status = Ap6256NdisToNtStatus(NDIS_STATUS_INVALID_DATA);
-                break;
-            }
-            Wifi->RoamLinkQualityThreshold =
+        status = Ap6256QualitySetPort(Wifi->Ctx, Header->PortId, (UINT32)parameters.Quality);
+        if (NT_SUCCESS(status) && Header->PortId == AP6256_STATION_PORT) {
+            Wifi->RoamLinkQualityThresholdValid =
+                (BOOLEAN)(parameters.Quality == WDI_CONNECTION_QUALITY_LOW_LATENCY);
+            if (Wifi->RoamLinkQualityThresholdValid)
+                Wifi->RoamLinkQualityThreshold =
                 parameters.LowLatencyParameters.RoamingNeededLinkQualityThreshold;
-            Wifi->RoamLinkQualityThresholdValid = TRUE;
-            TraceInfo(TRACE_NETADAPTER,
-                      "connection quality LOW_LATENCY: roam below link "
-                      "quality %u, off-channel at most %u ms\n",
-                      (ULONG)Wifi->RoamLinkQualityThreshold,
-                      (ULONG)parameters.LowLatencyParameters.MaximumOffChannelOperationTime);
-            break;
-
-        default:
-            TraceWarn(TRACE_NETADAPTER,
-                      "connection quality hint %u is not one this radio "
-                      "implements\n",
-                      (ULONG)parameters.Quality);
-            status = STATUS_NOT_SUPPORTED;
-            break;
         }
+        if (!NT_SUCCESS(status))
+            TraceWarn(TRACE_NETADAPTER, "connection quality %u port %u failed 0x%08X\n",
+                      (ULONG)parameters.Quality, (ULONG)Header->PortId, status);
     }
 
     CleanupParsedWdiSetConnectionQuality(&parameters);
@@ -5841,6 +5828,8 @@ Ap6256HandleResetRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
             }
         } else
             status = STATUS_NOT_FOUND;
+        if (NT_SUCCESS(status) && parameters.Dot11ResetParameters.SetDefaultMIB)
+            status = Ap6256QualityForgetPort(Wifi->Ctx, Header->PortId);
         CleanupParsedWdiTaskDot11Reset(&parameters);
         Ap6256CompleteRequest(Wifi, Request, status);
         if (NT_SUCCESS(status))
@@ -5874,6 +5863,10 @@ Ap6256HandleResetRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
                 Ap6256NetSetMacAddress(Wifi->Ctx);
             }
         }
+    }
+    if (NT_SUCCESS(status) && parameters.Dot11ResetParameters.SetDefaultMIB) {
+        status = Ap6256QualityForgetPort(Wifi->Ctx, AP6256_STATION_PORT);
+        Wifi->RoamLinkQualityThresholdValid = FALSE;
     }
     if (NT_SUCCESS(status)) {
         Ap6256FlushSoftwareQueues(Wifi);
@@ -6058,6 +6051,13 @@ Ap6256HandlePortRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request, _In
                 Wifi->StationPortMode = 0;
             } else
                 status = STATUS_NOT_FOUND;
+        }
+        if (NT_SUCCESS(status)) {
+            NTSTATUS qualityStatus = Ap6256QualityForgetPort(Wifi->Ctx, port);
+            if (!NT_SUCCESS(qualityStatus))
+                TraceWarn(TRACE_NETADAPTER, "deleted port %u quality restore failed 0x%08X\n",
+                    (ULONG)port, qualityStatus);
+            if (port == AP6256_STATION_PORT) Wifi->RoamLinkQualityThresholdValid = FALSE;
         }
         Ap6256RecomputePortModes(Wifi);
         CleanupParsedWdiTaskDeletePort(&parameters);
@@ -6415,7 +6415,7 @@ VOID Ap6256ProcessCommand(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request, L
         Ap6256HandleSetP2pWpsEnabled(Wifi, header, Request, tlv, tlvLength);
         break;
     case WDI_SET_CONNECTION_QUALITY:
-        Ap6256HandleSetConnectionQuality(Wifi, Request, tlv, tlvLength);
+        Ap6256HandleSetConnectionQuality(Wifi, header, Request, tlv, tlvLength);
         break;
     case WDI_SET_RECEIVE_COALESCING:
         Ap6256HandleSetReceiveCoalescing(Wifi, Request, tlv, tlvLength);

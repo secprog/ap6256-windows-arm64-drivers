@@ -5,6 +5,7 @@
  */
 
 #include "wifi_ops.h"
+#include "quality.h"
 #include "host_fips.h"
 #include "host_cipher_control.h"
 #include "host_cipher_transport.h"
@@ -131,7 +132,7 @@ typedef struct _BRCMF_REASSOC_PARAMS {
 
 #include <poppack.h>
 
-#define AP6256_BCN_THRESH           20u
+#define AP6256_BEACON_LOSS_TIMEOUT_SECONDS 4u
 
 #define WL_RADIO_SW_DISABLE         (1u << 0)
 #define WL_RADIO_HW_DISABLE         (1u << 1)
@@ -139,7 +140,6 @@ typedef struct _BRCMF_REASSOC_PARAMS {
 #define AP6256_SHORT_RETRY_LIMIT    7u
 #define AP6256_LONG_RETRY_LIMIT     4u
 
-#define AP6256_SCB_TIMEOUT_SECONDS  60u
 
 #define BRCMF_WSEC_PASSPHRASE       0x0001
 #define BRCMF_WSEC_MAX_PSK_LEN      64
@@ -617,7 +617,7 @@ static UINT32 Ap6256WifiQueryU32(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 
     if (Status != NULL) *Status = status;
     if (!NT_SUCCESS(status)) {
-        TraceWarn(TRACE_NETADAPTER, "  %-22s unsupported (0x%08X)\n",
+        TraceWarn(TRACE_NETADAPTER, "  %-22s query failed (0x%08X)\n",
                   Name, status);
         return 0;
     }
@@ -652,7 +652,6 @@ static VOID Ap6256WifiAssertStationRole(_In_ PAP6256_DEVICE_CONTEXT Ctx)
         { BRCMF_C_SET_FAKEFRAG,     0u,                         "fakefrag"     },
         { BRCMF_C_SET_SRL,          AP6256_SHORT_RETRY_LIMIT,   "short retry"  },
         { BRCMF_C_SET_LRL,          AP6256_LONG_RETRY_LIMIT,    "long retry"   },
-        { BRCMF_C_SET_SCB_TIMEOUT,  AP6256_SCB_TIMEOUT_SECONDS, "scb timeout"  },
     };
     ULONG i;
 
@@ -690,7 +689,6 @@ static VOID Ap6256WifiInventory(_In_ PAP6256_DEVICE_CONTEXT Ctx)
         { BRCMF_C_GET_AUTH,        "auth"             },
         { BRCMF_C_GET_WSEC,        "wsec"             },
         { BRCMF_C_GET_WPA_AUTH,    "wpa_auth"         },
-        { BRCMF_C_GET_KEY_PRIMARY, "primary key"      },
         { BRCMF_C_GET_PM,          "power save"       },
         { BRCMF_C_GET_RADIO,       "radio bits"       },
         { BRCMF_C_GET_PHYTYPE,     "phy type"         },
@@ -726,12 +724,14 @@ static VOID Ap6256WifiInventory(_In_ PAP6256_DEVICE_CONTEXT Ctx)
         }
 
         RtlZeroMemory(bssid, sizeof(bssid));
-        if (NT_SUCCESS(Ap6256BcdcQueryDcmd(Ctx, BRCMF_C_GET_BSSID,
+        if (Ctx->FirmwareLinkUp && NT_SUCCESS(Ap6256BcdcQueryDcmd(Ctx, BRCMF_C_GET_BSSID,
                                            bssid, sizeof(bssid)))) {
             TraceInfo(TRACE_NETADAPTER,
                       "  %-22s %02X:%02X:%02X:%02X:%02X:%02X\n", "bssid",
                       bssid[0], bssid[1], bssid[2], bssid[3], bssid[4],
                       bssid[5]);
+        } else if (!Ctx->FirmwareLinkUp) {
+            TraceInfo(TRACE_NETADAPTER, "  %-22s not associated\n", "bssid");
         }
 
         RtlZeroMemory(&rates, sizeof(rates));
@@ -1080,7 +1080,6 @@ static VOID Ap6256WifiConfigureScanTimes(_In_ PAP6256_DEVICE_CONTEXT Ctx)
         static const struct { PCSTR Name; UINT32 Value; } iovars[] = {
             { "scan_nprobes",              AP6256_SCAN_NPROBES },
             { "scan_home_time",            AP6256_SCAN_HOME_TIME_MS },
-            { "scan_unassoc_time_default", AP6256_SCAN_UNASSOC_TIME_MS },
         };
 
         for (i = 0; i < RTL_NUMBER_OF(iovars); i++) {
@@ -1129,10 +1128,10 @@ static UINT32 Ap6256WifiConfiguredPowerSave(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
-NTSTATUS Ap6256WifiSetPowerSave(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-                                _In_ BOOLEAN Enabled)
+NTSTATUS Ap6256WifiProgramPowerSave(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+                                _In_ BOOLEAN Enabled, _In_ BOOLEAN ForceOff)
 {
-    UINT32 pm = Enabled ? Ap6256WifiConfiguredPowerSave(Ctx) : AP6256_PM_OFF;
+    UINT32 pm = Enabled && !ForceOff ? Ap6256WifiConfiguredPowerSave(Ctx) : AP6256_PM_OFF;
     NTSTATUS status = Ap6256BcdcSetDcmd(Ctx, BRCMF_C_SET_PM, &pm, sizeof(pm));
 
     if (!NT_SUCCESS(status)) {
@@ -1140,11 +1139,17 @@ NTSTATUS Ap6256WifiSetPowerSave(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                   pm, status);
     } else {
         UINT32 readBack = 0;
+        AP6256_BCDC_QUERY_RESULT result;
 
-        (VOID)Ap6256BcdcQueryDcmd(Ctx, BRCMF_C_GET_PM,
-                                  &readBack, sizeof(readBack));
+        status = Ap6256BcdcQueryDcmdResultIf(Ctx, 0, BRCMF_C_GET_PM,
+                                  &readBack, sizeof(readBack), &result);
+        if (!NT_SUCCESS(status)) return status;
+        if (!result.FirmwareReply || result.FirmwareError ||
+            result.PayloadLength < sizeof(readBack) || readBack != pm)
+            return STATUS_DEVICE_PROTOCOL_ERROR;
         TraceInfo(TRACE_NETADAPTER, "power save %s (firmware reports %u)\n",
                   pm == AP6256_PM_FAST ? "FAST (doze between beacons)"
+                  : pm == AP6256_PM_OFF && ForceOff ? "OFF by connection quality"
                   : pm == AP6256_PM_OFF && Enabled ? "OFF by registry PowerSaveMode"
                   : pm == AP6256_PM_OFF ? "OFF" : "MAX by registry PowerSaveMode",
                   readBack);
@@ -1470,6 +1475,7 @@ NTSTATUS Ap6256WifiUp(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 
     Ap6256WifiConfigureDongle(Ctx);
     status = Ap6256WifiConfigureNativeManagement(Ctx);
+    if (NT_SUCCESS(status)) status = Ap6256QualityReapply(Ctx);
     if (NT_SUCCESS(status)) status = Ap6256QualifyService(Ctx);
     if (NT_SUCCESS(status)) status = Ap6256QualifyFtm(Ctx);
     if (NT_SUCCESS(status)) status = Ap6256FipsQualify(Ctx, Ctx->FirmwareFtmPatchVerified);
@@ -4598,6 +4604,8 @@ NTSTATUS Ap6256WifiResumeFromWake(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     Ap6256WlfcResumeRetained(Ctx, KeQueryInterruptTime() - Ctx->RetainedSleepStarted);
     InterlockedExchange(&Ctx->FirmwareIoQuiesced, 0);
     Ctx->PowerThread = NULL;
+    status = Ap6256QualityReapply(Ctx);
+    if (!NT_SUCCESS(status) && NT_SUCCESS(firstFailure)) firstFailure = status;
     InterlockedExchange(&Ctx->HostTxQuiesced, 0);
     Ap6256NetTxKick(Ctx);
     TraceInfo(TRACE_NETADAPTER,
@@ -4625,18 +4633,41 @@ _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiGetRoamTrigger(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                                   _Out_ PINT32 TriggerDbm)
 {
-    INT32 request[2];
+    INT32 request[2] = {0};
     NTSTATUS status;
 
     *TriggerDbm = AP6256_ROAM_RSSI_DEFAULT_DBM;
 
-    request[0] = 0;
-    request[1] = 0;
-    status = Ap6256BcdcQueryDcmd(Ctx, BRCMF_C_GET_ROAM_TRIGGER, request,
-                                 sizeof(request));
+    {
+        UINT32 chanspec = 0, band;
+        AP6256_BCDC_QUERY_RESULT result;
+        status = Ap6256BcdcGetIovarResultIf(Ctx, 0, "chanspec", &chanspec,
+            sizeof(chanspec), &result);
+        if (NT_SUCCESS(status) && (!result.FirmwareReply || result.FirmwareError ||
+            result.PayloadLength < sizeof(chanspec) || chanspec > MAXUINT16 ||
+            (chanspec & 0xffu) == 0)) status = STATUS_DEVICE_PROTOCOL_ERROR;
+        band = Ctx->D11IoType == BRCMU_D11AC_IOTYPE ? chanspec & 0xc000u : chanspec & 0xf000u;
+        if (NT_SUCCESS(status)) {
+            if ((Ctx->D11IoType == BRCMU_D11AC_IOTYPE && band == BRCMU_CHSPEC_D11AC_BAND_5G) ||
+                (Ctx->D11IoType == BRCMU_D11N_IOTYPE && band == BRCMU_CHSPEC_D11N_BAND_5G))
+                request[1] = 1;
+            else if ((Ctx->D11IoType == BRCMU_D11AC_IOTYPE && band == BRCMU_CHSPEC_D11AC_BAND_2G) ||
+                     (Ctx->D11IoType == BRCMU_D11N_IOTYPE && band == BRCMU_CHSPEC_D11N_BAND_2G))
+                request[1] = 2;
+            else status = STATUS_DEVICE_PROTOCOL_ERROR;
+        }
+        if (NT_SUCCESS(status)) {
+            request[0] = 0;
+            status = Ap6256BcdcQueryDcmdResultIf(Ctx, 0, BRCMF_C_GET_ROAM_TRIGGER, request,
+                                 sizeof(request), &result);
+            if (NT_SUCCESS(status) && (!result.FirmwareReply || result.FirmwareError ||
+                result.PayloadLength < sizeof(request[0]) ||
+                request[0] <= AP6256_RSSI_EVENT_FLOOR || request[0] >= 0))
+                status = STATUS_DEVICE_PROTOCOL_ERROR;
+        }
+    }
     if (!NT_SUCCESS(status)) {
-        TraceWarn(TRACE_NETADAPTER,
-                  "roam trigger unreadable 0x%08X; using %d dBm\n",
+        TraceWarn(TRACE_NETADAPTER, "roam trigger query failed 0x%08X; using %d dBm\n",
                   status, AP6256_ROAM_RSSI_DEFAULT_DBM);
         return status;
     }
@@ -4671,9 +4702,18 @@ _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256WifiArmRoamTriggers(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 {
     INT32 trigger = AP6256_ROAM_RSSI_DEFAULT_DBM;
-    UINT32 beacons = AP6256_BCN_THRESH;
-
-    (VOID)Ap6256BcdcSetIovar(Ctx, "bcn_thresh", &beacons, sizeof(beacons));
+    UINT32 timeout = AP6256_BEACON_LOSS_TIMEOUT_SECONDS, actual = 0;
+    AP6256_BCDC_QUERY_RESULT result;
+    NTSTATUS status = Ap6256BcdcSetIovar(Ctx, "bcn_timeout", &timeout, sizeof(timeout));
+    if (NT_SUCCESS(status)) {
+        status = Ap6256BcdcGetIovarResultIf(Ctx, 0, "bcn_timeout", &actual, sizeof(actual), &result);
+        if (NT_SUCCESS(status) && (!result.FirmwareReply || result.FirmwareError ||
+            result.PayloadLength < sizeof(actual) || actual != timeout))
+            status = STATUS_DEVICE_PROTOCOL_ERROR;
+    }
+    if (!NT_SUCCESS(status))
+        TraceWarn(TRACE_NETADAPTER, "beacon loss timeout %u seconds not confirmed 0x%08X\n",
+            timeout, status);
 
     (VOID)Ap6256WifiGetRoamTrigger(Ctx, &trigger);
     Ctx->RoamRssiTriggerDbm = trigger;
@@ -4904,7 +4944,7 @@ NTSTATUS Ap6256WifiGetMaxKeys(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     query.Header.Type = BRCMF_WSEC_INFO_MAX_KEYS;
     query.Header.Length = sizeof(query.Value);
 
-    status = Ap6256BcdcGetIovar(Ctx, "wsec_info", &query, sizeof(query));
+    status = Ap6256BcdcProbeIovar(Ctx, "wsec_info", &query, sizeof(query), NULL);
     if (!NT_SUCCESS(status)) return status;
 
     if (query.Header.Length != sizeof(query.Value) || query.Value == 0) {

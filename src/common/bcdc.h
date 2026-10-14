@@ -82,6 +82,11 @@ NTSTATUS Ap6256BcdcGetIovarResultIf(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     _Out_opt_ PAP6256_BCDC_QUERY_RESULT Result);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256BcdcProbeIovar(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ PCSTR Name,
+    _Inout_updates_bytes_(Length) PVOID Out, _In_ ULONG Length,
+    _Out_opt_ PAP6256_BCDC_QUERY_RESULT Result);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256BcdcSetIovarIf(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                               _In_ UINT32 IfIndex, _In_ PCSTR Name,
                               _In_reads_bytes_(Length) const VOID* Data,

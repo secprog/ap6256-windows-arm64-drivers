@@ -372,8 +372,22 @@ typedef struct _AP6256_GO_STATE {
     AP6256_P2P_STATE P2p;
 } AP6256_GO_STATE;
 
+typedef struct _AP6256_CONNECTION_QUALITY {
+    KMUTEX Lock;
+    BOOLEAN Initialized;
+    BOOLEAN PowerSaveRequested;
+    BOOLEAN MchanSaved;
+    UINT32 SavedMchanAlgorithm;
+    UINT32 SavedMchanBandwidth;
+    BOOLEAN GroupPmSaved;
+    UINT32 SavedGroupPm;
+    UINT32 GroupPmIfIndex;
+    UINT32 Hints[AP6256_GROUP_PORT + 1];
+} AP6256_CONNECTION_QUALITY;
+
 typedef struct _AP6256_DEVICE_CONTEXT {
     AP6256_GO_STATE Go;
+    AP6256_CONNECTION_QUALITY ConnectionQuality;
 
     volatile LONG FirmwareIfMap[16];
 #include <device_fields.h>

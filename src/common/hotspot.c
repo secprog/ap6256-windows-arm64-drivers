@@ -5,6 +5,7 @@
  */
 
 #include "hotspot.h"
+#include "quality.h"
 #include "host_fips.h"
 #include "bcdc.h"
 #include "p2p.h"
@@ -294,6 +295,7 @@ NTSTATUS Ap6256GoCreate(PAP6256_DEVICE_CONTEXT Ctx)
         if (role == AP6256_P2P_IF_GO)
             status = Ap6256GoSetBsscfg(Ctx, "ap_isolate", &one, sizeof(one));
     }
+    if (NT_SUCCESS(status)) status = Ap6256QualityReapply(Ctx);
     if (NT_SUCCESS(status)) goto done;
 failed:
     {
@@ -305,7 +307,10 @@ failed:
         Ctx->Go.FirmwareReady = FALSE;
         Ctx->Go.NativeStateUncertain = (BOOLEAN)(!NT_SUCCESS(deleteStatus) && !absent);
 
-        if (NT_SUCCESS(deleteStatus) || absent) (VOID)Ap6256TdlsSetBlocked(Ctx, FALSE);
+        if (NT_SUCCESS(deleteStatus) || absent) {
+            Ap6256QualityForgetGroupFirmware(Ctx);
+            (VOID)Ap6256TdlsSetBlocked(Ctx, FALSE);
+        }
         TraceDiag("P2P: create cleanup: status 0x%08X firmware %d reply %u absent %u\n",
             deleteStatus, deleteResult.FirmwareStatus, (ULONG)deleteResult.FirmwareReply,
             (ULONG)absent);
@@ -535,6 +540,7 @@ NTSTATUS Ap6256GoDelete(PAP6256_DEVICE_CONTEXT Ctx)
         status = Ap6256GoStop(Ctx);
         if (!NT_SUCCESS(status)) return status;
         status = Ap6256BcdcSetIovar(Ctx, "p2p_ifdel", Ctx->Go.Address, 6);
+        if (NT_SUCCESS(status)) Ap6256QualityForgetGroupFirmware(Ctx);
         if (NT_SUCCESS(status) && Ctx->Go.BssIndex < RTL_NUMBER_OF(Ctx->FirmwareIfMap)) {
             ULONG attempt;
             LARGE_INTEGER delay;
@@ -554,6 +560,7 @@ NTSTATUS Ap6256GoDelete(PAP6256_DEVICE_CONTEXT Ctx)
     if (NT_SUCCESS(status)) {
         Ctx->Go.FirmwareReady = FALSE;
         Ctx->Go.Started = FALSE;
+        Ap6256QualityForgetGroupFirmware(Ctx);
         Ap6256P2pForgetIesFor(&Ctx->Go.P2p);
 
         if (wasReady) (VOID)Ap6256TdlsSetBlocked(Ctx, FALSE);

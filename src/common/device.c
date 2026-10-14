@@ -56,7 +56,7 @@ static VOID Ap6256ProbeRoamingControls(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     for (i = 0; i < RTL_NUMBER_OF(names); i++) {
         UINT32 words[4] = {0};
         AP6256_BCDC_QUERY_RESULT result;
-        NTSTATUS status = Ap6256BcdcGetIovarResultIf(Ctx, 0, names[i],
+        NTSTATUS status = Ap6256BcdcProbeIovar(Ctx, names[i],
             words, sizeof(words), &result);
 
         TraceDiag("feature probe: %s status 0x%08X reply %u error %u fw %d "
@@ -350,9 +350,9 @@ NTSTATUS Ap6256BringUpChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             UCHAR ndState[24];
 
             probe = 0;
-            s1 = Ap6256BcdcGetIovar(Ctx, "sae", &probe, sizeof(probe));
+            s1 = Ap6256BcdcProbeIovar(Ctx, "sae", &probe, sizeof(probe), NULL);
             probe = 0;
-            s2 = Ap6256BcdcGetIovar(Ctx, "sae_password", &probe, sizeof(probe));
+            s2 = Ap6256BcdcProbeIovar(Ctx, "sae_password", &probe, sizeof(probe), NULL);
             probe = 0;
             s3 = Ap6256BcdcGetIovar(Ctx, "mfp", &probe, sizeof(probe));
             probe = 0;
@@ -365,7 +365,7 @@ NTSTATUS Ap6256BringUpChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             {
                 AP6256_BCDC_QUERY_RESULT result;
                 UINT32 ready = 0;
-                status = Ap6256BcdcGetIovarResultIf(Ctx, 0, "wdi_wowl_ready",
+                status = Ap6256BcdcProbeIovar(Ctx, "wdi_wowl_ready",
                     &ready, sizeof(ready), &result);
                 Ctx->FirmwareWowlAdapter = (BOOLEAN)(NT_SUCCESS(status) &&
                     result.PayloadLength == sizeof(ready) && ready == AP6256_WOWL_ABI);
@@ -393,7 +393,7 @@ NTSTATUS Ap6256BringUpChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             Ctx->FirmwareArpOffloadSupported = (BOOLEAN)NT_SUCCESS(s4);
 
             RtlZeroMemory(ndState, sizeof(ndState));
-            ndStatus = Ap6256BcdcGetIovar(Ctx, Ctx->FirmwareWowlAdapter ? "wdi_nd_status" : "nd_status", ndState, sizeof(ndState));
+            ndStatus = Ap6256BcdcProbeIovar(Ctx, Ctx->FirmwareWowlAdapter ? "wdi_nd_status" : "nd_status", ndState, sizeof(ndState), NULL);
             Ctx->FirmwareNdOffloadSupported =
                 (BOOLEAN)(NT_SUCCESS(s5) && NT_SUCCESS(ndStatus));
             TraceDiag("firmware probe: arpoe 0x%08X, ndoe 0x%08X, nd_status 0x%08X -> "
