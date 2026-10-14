@@ -4068,6 +4068,7 @@ static VOID Ap6256HandleP2pSendResponseActionFrame(
                 if (info->Optional.GroupID_IsPresent) {
                     Ap6256FillP2pGroupId(&frame, &info->GroupID);
                 }
+            }
         }
 
         default:
