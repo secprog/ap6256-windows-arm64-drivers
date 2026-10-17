@@ -1,0 +1,482 @@
+{
+  "schema": 1,
+  "suites": [
+    {
+      "name": "firmware-startup",
+      "file": "test-firmware-startup.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "native-departure",
+      "file": "test-native-departure.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "explicit-disconnect",
+      "file": "test-explicit-disconnect.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "security-cleanup",
+      "file": "test-security-cleanup.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "station-departure",
+      "file": "test-station-departure.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "scan-ownership",
+      "file": "test-scan-ownership.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "association-pmf",
+      "file": "test-association-pmf.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "firmware-statistics",
+      "file": "test-firmware-statistics.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "bus-statistics",
+      "file": "test-bus-statistics.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "eapol-receive",
+      "file": "test-eapol-rx.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "rx-lifetime",
+      "file": "test-rx-lifetime.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "wlfc",
+      "file": "test-wlfc.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "wdi-transmit",
+      "file": "test-wdi-transmit.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "key-barrier",
+      "file": "test-cipher-keys.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "beacon-transport",
+      "file": "test-beacon-timeout-transport.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "iapp-policy",
+      "file": "test-iapp-policy.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "p2p-wdi",
+      "file": "test-p2p-wdi.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "warning-fixes",
+      "file": "test-warning-fixes.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "firmware-probes",
+      "file": "test-firmware-probes.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "connection-quality",
+      "file": "test-connection-quality.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "connection-quality-codec",
+      "file": "test-connection-quality-codec.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "power-statistics",
+      "file": "test-power-save-statistics.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "hotspot-data",
+      "file": "test-hotspot-data.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "wificx-group-keys",
+      "file": "test-wificx-group-key-lifecycle.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "control-retry",
+      "file": "test-control-retry.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "firmware-halt",
+      "file": "test-firmware-halt.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "capabilities-wdi",
+      "file": "test-wdi-capabilities.py",
+      "flags": [
+        "--firmware-reports",
+        "--wdi-ft",
+        "--wdi-sae",
+        "--wdi-owe",
+        "--native-wifi-replay"
+      ],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "capabilities-wificx",
+      "file": "test-wdi-capabilities.py",
+      "flags": [
+        "--firmware-reports",
+        "--wdi-ft",
+        "--wdi-sae",
+        "--wdi-owe",
+        "--algo-model",
+        "wificx"
+      ],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "public-rsn",
+      "file": "test-host-cipher-rsn.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "enterprise-station",
+      "file": "test-station-security.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "host-cipher-control",
+      "file": "test-host-cipher-control.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "host-cipher-recovery",
+      "file": "test-host-cipher-recovery.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "host-fips-wire",
+      "file": "test-host-fips-wire.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "debug-settings",
+      "file": "test-debug-log-settings.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "debug-settings-force",
+      "file": "test-debug-log-settings.py",
+      "flags": [
+        "--force-windbg"
+      ],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "tracing",
+      "file": "test-production-tracing.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "tracing-live",
+      "file": "test-production-tracing.py",
+      "flags": [
+        "--live"
+      ],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "tracing-lifecycle",
+      "file": "test-production-tracing.py",
+      "flags": [
+        "--lifecycle"
+      ],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "scan-results",
+      "file": "test-scan-results.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "nlo-results",
+      "file": "test-pno-results.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "host-cipher-crypto",
+      "file": "test-host-cipher-crypto.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "host-cipher-store",
+      "file": "test-host-cipher-store.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "host-cipher-path",
+      "file": "test-host-cipher-path.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "host-cipher-transport",
+      "file": "test-host-cipher-transport.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "power-settings",
+      "file": "test-power-save-settings.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "watchdog",
+      "file": "test-interrupt-watchdog.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "wdi-contract",
+      "file": "test-wdi-contract.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "sae-station",
+      "file": "test-sae-station.py",
+      "flags": [
+        "--model",
+        "wdi"
+      ],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "wowl-offloads",
+      "file": "test-wowl-offloads.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wowl-add-gate",
+      "file": "test-wowl-add-gate.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wowl-power",
+      "file": "test-wowl-power.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wowl-gtk",
+      "file": "test-wowl-gtk.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-security",
+      "file": "test-wificx-security.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-roles",
+      "file": "test-wificx-roles.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-role-lifecycle",
+      "file": "test-wificx-role-lifecycle.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-role-drain",
+      "file": "test-wificx-role-drain.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-group-integration",
+      "file": "test-wificx-group-integration.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-group-mode",
+      "file": "test-wificx-group-mode.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-group-power",
+      "file": "test-wificx-group-power.py",
+      "flags": [],
+      "output": "--output-dir",
+      "optional": false
+    },
+    {
+      "name": "wificx-cold-power",
+      "file": "test-wificx-cold-power.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-factory-cold",
+      "file": "test-wificx-factory-cold.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-factory-power",
+      "file": "test-wificx-factory-power.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "wificx-hardware-stop",
+      "file": "test-wificx-hardware-stop.py",
+      "flags": [],
+      "output": null,
+      "optional": false
+    },
+    {
+      "name": "bt-acl-read-bounds",
+      "file": "test-bt-acl-read-bounds.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "bt-prefetch",
+      "file": "test-bt-prefetch-queue.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    }
+  ]
+}

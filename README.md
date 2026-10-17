@@ -62,7 +62,7 @@ files declare `GPL-3.0-only AND ISC`; project-authored additions remain GPL.
 Nine Bluetooth files identified in [NOTICE.txt](NOTICE.txt) retain MS-PL.
 See [LICENSE](LICENSE), [LICENSE-ISC.txt](LICENSE-ISC.txt), NOTICE.txt and
 [bt/LICENSE-MS-PL.txt](bt/LICENSE-MS-PL.txt) for the license scope and provenance.
-The original Bluetooth code and its generated build metadata have the narrow
+The Bluetooth code, its tests and generated build metadata have the narrow
 combination permission described in
 [BLUETOOTH-LINKING-EXCEPTION.txt](BLUETOOTH-LINKING-EXCEPTION.txt).
 
@@ -70,3 +70,7 @@ combination permission described in
 
 Broadcom, Cypress, Infineon, AMPAK, SparkLAN, Raspberry Pi, and Windows are
 trademarks of their respective owners. This is an independent project.
+
+## Host tests
+
+[Public host tests](tests/README.md) cover departure, security, transmit/receive, scanning, power, capabilities, logging and Bluetooth.

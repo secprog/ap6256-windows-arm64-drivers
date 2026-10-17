@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Licensed under the GNU General Public License, version 3 only.
+# Provided without warranty. See LICENSE for the license text.
+
+name: Public host tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+
+      - name: Install the independent crypto oracle
+        run: |
+          python -m pip install -r tests/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
+
+      - name: Cache host SDK and WDK packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/ap6256-host-packages
+          key: windows-x64-host-kits-${{ hashFiles('.github/scripts/test-packages.config') }}
+
+      - name: Restore host SDK and WDK packages
+        run: |
+          nuget restore .github/scripts/test-packages.config -PackagesDirectory "$env:RUNNER_TEMP/ap6256-host-packages" -Source https://api.nuget.org/v3/index.json -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'Host SDK/WDK package restore failed.' }
+
+      - name: Run host tests
+        run: ./.github/scripts/run-host-tests.ps1 -OutputDirectory "$env:RUNNER_TEMP/ap6256-host-run" -ReportDirectory "$env:RUNNER_TEMP/ap6256-host-reports" -WdkPackageDirectory "$env:RUNNER_TEMP/ap6256-host-packages"
+
+      - name: Upload reports and license notices
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ap6256-host-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ap6256-host-reports/
+          if-no-files-found: error
+          retention-days: 14
