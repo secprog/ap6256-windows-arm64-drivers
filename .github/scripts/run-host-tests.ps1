@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $packageRoot = [IO.Path]::GetFullPath($WdkPackageDirectory)
-[xml]$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'test-packages.config') -Raw
+[xml]$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'host-tests/packages.config') -Raw
 $content = @{}
 foreach ($package in $manifest.packages.package) {
     $path = Join-Path $packageRoot ($package.id + '.' + $package.version + '/c')

@@ -7,7 +7,7 @@
       "license": "GPL-3.0-only",
       "origin": "AP6256 OSS Driver Project"
     },
-    ".github/scripts/test-packages.config": {
+    ".github/scripts/host-tests/packages.config": {
       "license": "GPL-3.0-only",
       "origin": "AP6256 OSS Driver Project"
     },

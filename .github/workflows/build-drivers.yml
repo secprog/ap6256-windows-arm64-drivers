@@ -24,7 +24,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tests:
+    uses: ./.github/workflows/host-tests.yml
+
   build:
+    needs: tests
     runs-on: windows-2022
     timeout-minutes: 60
     defaults:

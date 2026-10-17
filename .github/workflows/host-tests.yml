@@ -5,8 +5,7 @@
 name: Public host tests
 
 on:
-  push:
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -42,18 +41,19 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/ap6256-host-packages
-          key: windows-x64-host-kits-${{ hashFiles('.github/scripts/test-packages.config') }}
+          key: windows-x64-host-kits-${{ hashFiles('.github/scripts/host-tests/packages.config') }}
 
       - name: Restore host SDK and WDK packages
         run: |
-          nuget restore .github/scripts/test-packages.config -PackagesDirectory "$env:RUNNER_TEMP/ap6256-host-packages" -Source https://api.nuget.org/v3/index.json -NonInteractive
+          nuget restore .github/scripts/host-tests/packages.config -PackagesDirectory "$env:RUNNER_TEMP/ap6256-host-packages" -Source https://api.nuget.org/v3/index.json -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'Host SDK/WDK package restore failed.' }
 
       - name: Run host tests
+        id: host_tests
         run: ./.github/scripts/run-host-tests.ps1 -OutputDirectory "$env:RUNNER_TEMP/ap6256-host-run" -ReportDirectory "$env:RUNNER_TEMP/ap6256-host-reports" -WdkPackageDirectory "$env:RUNNER_TEMP/ap6256-host-packages"
 
       - name: Upload reports and license notices
-        if: always()
+        if: ${{ always() && (steps.host_tests.outcome == 'success' || steps.host_tests.outcome == 'failure') }}
         uses: actions/upload-artifact@v7
         with:
           name: ap6256-host-reports-${{ github.run_id }}-${{ github.run_attempt }}
