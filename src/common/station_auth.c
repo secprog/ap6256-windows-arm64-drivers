@@ -126,7 +126,7 @@ VOID Ap6256ModelCompleteAuthentication(PAP6256_WIFI Wifi)
 
 BOOLEAN Ap6256ModelRetryAssociation(PAP6256_WIFI Wifi)
 {
-    return Ap6256StationSaeFallback(Wifi);
+    return !Wifi->Auth.AssocComebackPending && Ap6256StationSaeFallback(Wifi);
 }
 
 BOOLEAN Ap6256ModelStaleLinkEvent(PAP6256_WIFI Wifi, UCHAR FirmwareEvent,
@@ -176,6 +176,8 @@ NTSTATUS Ap6256StationStartNext(_In_ PAP6256_WIFI Wifi)
         if (!NT_SUCCESS(status)) return status;
         KeAcquireSpinLock(&Wifi->CommandLock, &irql);
         InterlockedIncrement(&Wifi->ConnectGeneration);
+        Wifi->Auth.AssocFailure.Length = 0;
+        Wifi->Auth.AssocComebackPending = FALSE;
         Wifi->Auth.SaeEventGeneration = 0;
         Wifi->Auth.HostCipherGeneration = 0;
         Wifi->ConnectBssidValid = p->BssidValid;
@@ -324,6 +326,96 @@ static NTSTATUS Ap6256StationAssociationDisconnect(PAP6256_WIFI Wifi, BOOLEAN Ho
 }
 
 _Use_decl_annotations_
+VOID Ap6256NetStationAssocFailure(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Peer,
+    UINT32 FirmwareGeneration, BOOLEAN ReAssociation, const UCHAR* Response, ULONG Length)
+{
+    PAP6256_WIFI wifi = Ap6256WifiFromDevice(Ctx);
+    KIRQL irql;
+    UINT16 status, capability;
+    if (wifi == NULL || Peer == NULL || Response == NULL || !FirmwareGeneration ||
+        Length < 6 || Length > AP6256_ASSOC_FAILURE_MAX)
+        return;
+    capability = (UINT16)(Response[0] | ((UINT16)Response[1] << 8));
+    status = (UINT16)(Response[2] | ((UINT16)Response[3] << 8));
+    if (!capability || capability == 0xffff || !status || status >= 127)
+        return;
+    KeAcquireSpinLock(&wifi->CommandLock, &irql);
+    if (wifi->ConnectTask.Active && !wifi->ConnectDeparting && !wifi->Stopping &&
+        wifi->Auth.SaeGeneration == wifi->ConnectGeneration &&
+        wifi->Auth.SaeEventGeneration == FirmwareGeneration &&
+        wifi->ConnectBssidValid && RtlEqualMemory(wifi->ConnectBssid, Peer, 6)) {
+        AP6256_ASSOC_FAILURE* failure = &wifi->Auth.AssocFailure;
+        failure->ConnectGeneration = wifi->ConnectGeneration;
+        failure->FirmwareGeneration = FirmwareGeneration;
+        failure->ReAssociation = ReAssociation;
+        RtlCopyMemory(failure->Peer, Peer, 6);
+        RtlCopyMemory(failure->Response, Response, Length);
+        failure->Length = Length;
+    }
+    KeReleaseSpinLock(&wifi->CommandLock, irql);
+}
+
+static BOOLEAN Ap6256StationCopyAssocFailure(PAP6256_WIFI Wifi, AP6256_ASSOC_FRAMES* Frames)
+{
+    AP6256_ASSOC_FAILURE failure = {0};
+    KIRQL irql;
+    PUCHAR response;
+    BOOLEAN valid;
+    KeAcquireSpinLock(&Wifi->CommandLock, &irql);
+    valid = Wifi->ConnectTask.Active && Wifi->ConnectBssidValid &&
+        Wifi->Auth.AssocFailure.Length >= 6 &&
+        Wifi->Auth.AssocFailure.Length <= AP6256_ASSOC_FAILURE_MAX &&
+        Wifi->Auth.AssocFailure.ConnectGeneration == Wifi->ConnectGeneration &&
+        Wifi->Auth.AssocFailure.FirmwareGeneration == Wifi->Auth.SaeEventGeneration &&
+        RtlEqualMemory(Wifi->Auth.AssocFailure.Peer, Wifi->ConnectBssid, 6);
+    if (valid) failure = Wifi->Auth.AssocFailure;
+    Wifi->Auth.AssocFailure.Length = 0;
+    KeReleaseSpinLock(&Wifi->CommandLock, irql);
+    if (!valid) return FALSE;
+    response = (PUCHAR)ExAllocatePool2(POOL_FLAG_NON_PAGED, failure.Length, AP6256_POOL_TAG);
+    if (response == NULL) return FALSE;
+    RtlCopyMemory(response, failure.Response, failure.Length);
+    if (Frames->AssocResponse != NULL)
+        ExFreePoolWithTag(Frames->AssocResponse, AP6256_POOL_TAG);
+    Frames->AssocResponse = response;
+    Frames->AssocResponseLength = failure.Length;
+    Frames->ReAssociation = failure.ReAssociation;
+    Frames->PeerStatusCode = (UINT16)(response[2] | ((UINT16)response[3] << 8));
+    Frames->PeerStatusValid = TRUE;
+    return TRUE;
+}
+
+static UINT32 Ap6256AssociationComebackTime(const AP6256_ASSOC_FRAMES* Frames)
+{
+    ULONG offset = 6;
+    UINT32 comeback = 0;
+    BOOLEAN found = FALSE;
+    if (!Frames->PeerStatusValid || Frames->PeerStatusCode != 30 ||
+        Frames->AssocResponse == NULL || Frames->AssocResponseLength < 6 ||
+        Frames->AssocResponseLength > AP6256_ASSOC_FAILURE_MAX ||
+        Frames->AssocResponse[2] != 30 || Frames->AssocResponse[3] != 0)
+        return 0;
+    while (offset < Frames->AssocResponseLength) {
+        const UCHAR* ie = Frames->AssocResponse + offset;
+        ULONG length;
+        if (Frames->AssocResponseLength - offset < 2) return 0;
+        length = ie[1];
+        if (length > Frames->AssocResponseLength - offset - 2) return 0;
+        if (ie[0] == 56) {
+            if (length != 5) return 0;
+            if (ie[2] == 3) {
+                if (found) return 0;
+                comeback = (UINT32)ie[3] | ((UINT32)ie[4] << 8) |
+                    ((UINT32)ie[5] << 16) | ((UINT32)ie[6] << 24);
+                found = TRUE;
+            }
+        }
+        offset += length + 2;
+    }
+    return comeback;
+}
+
+_Use_decl_annotations_
 BOOLEAN
 Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER* Header,
                           _In_opt_ PVOID RequestId, _In_ BOOLEAN Success)
@@ -340,7 +432,7 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
     NDIS_STATUS ndisStatus;
     KIRQL oldIrql;
     AP6256_ASSOC_FRAMES frames;
-    BOOLEAN owePeerFailure = FALSE;
+    BOOLEAN peerFailure = FALSE;
     BOOLEAN indicationDelivered = FALSE;
     UINT32 hostCipherGeneration = Wifi->Auth.HostCipherGeneration;
     BOOLEAN hostCipher = Wifi->UnicastCipher == WDI_CIPHER_ALGO_GCMP_256 ||
@@ -367,15 +459,21 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
     authAlgorithm = Wifi->AuthAlgorithm;
     KeReleaseSpinLock(&Wifi->CommandLock, oldIrql);
 
-    if (!Success && authAlgorithm == WDI_AUTH_ALGO_OWE && Wifi->Ctx->FirmwareOweGeneration &&
+    if (!Success && ((!hostCipher && authAlgorithm == WDI_AUTH_ALGO_WPA3_SAE) ||
+                      authAlgorithm == WDI_AUTH_ALGO_OWE) &&
         Wifi->ConnectTask.Active && Wifi->ConnectCandidateIndex < Wifi->ConnectCandidateCount) {
         const AP6256_CONNECT_PARAMS* candidate =
             &Wifi->ConnectCandidates[Wifi->ConnectCandidateIndex];
-        Ap6256WifiGetAssocFrames(Wifi->Ctx, &frames);
-        owePeerFailure = frames.PeerStatusValid && frames.PeerStatusCode != 0 &&
+        if (authAlgorithm == WDI_AUTH_ALGO_WPA3_SAE)
+            peerFailure = Ap6256StationCopyAssocFailure(Wifi, &frames);
+        else {
+            Ap6256WifiGetAssocFrames(Wifi->Ctx, &frames);
+            peerFailure = Wifi->Ctx->FirmwareOweGeneration &&
+                frames.PeerStatusValid && frames.PeerStatusCode != 0 &&
                          RtlEqualMemory(candidate->Bssid, Wifi->Ctx->FirmwareOwePeer, 6) &&
                          Ap6256OweRequestValid(candidate, &frames);
-        if (!owePeerFailure)
+        }
+        if (!peerFailure)
             Ap6256WifiFreeAssocFrames(&frames);
     }
     if (Success && requestedChannel == 0 &&
@@ -509,6 +607,7 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
         result.AssociationResultParameters.MulticastMgmtCipherAlgorithm = WDI_CIPHER_ALGO_NONE;
     }
     KeAcquireSpinLock(&Wifi->CommandLock, &oldIrql);
+    Wifi->Auth.AssocComebackPending = peerFailure && frames.PeerStatusCode == 30;
     if (!Success && Wifi->ConnectBssidValid) {
         RtlCopyMemory(bssid, Wifi->ConnectBssid, sizeof(bssid));
     }
@@ -516,7 +615,7 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
     result.AssociationResultParameters.AssociationStatus =
         Success
             ? WDI_ASSOC_STATUS_SUCCESS
-            : (owePeerFailure ? WDI_ASSOC_STATUS_ASSOC_FAILED_BY_PEER : WDI_ASSOC_STATUS_FAILURE);
+            : (peerFailure ? WDI_ASSOC_STATUS_ASSOC_FAILED_BY_PEER : WDI_ASSOC_STATUS_FAILURE);
     result.AssociationResultParameters.AuthAlgorithm = Wifi->AuthAlgorithm;
     result.AssociationResultParameters.UnicastCipherAlgorithm = Wifi->UnicastCipher;
     result.AssociationResultParameters.MulticastDataCipherAlgorithm = Wifi->MulticastCipher;
@@ -599,18 +698,22 @@ Ap6256IndicateAssociation(_In_ PAP6256_WIFI Wifi, _In_ const WDI_MESSAGE_HEADER*
                   ? "authorized"
                   : "unauthorized (host supplicant owes the keys)");
 
-    if (Success || owePeerFailure) {
-        Ap6256ModelUpdateReceiveContext(Wifi);
+    if (Success || peerFailure) {
+        if (Success) Ap6256ModelUpdateReceiveContext(Wifi);
 
         result.AssociationResultParameters.ReAssociation = frames.ReAssociation;
         result.AssociationResultParameters.StatusCode = frames.PeerStatusCode;
 
+        result.AssociationResultParameters.AssociationComebackTime =
+            peerFailure ? Ap6256AssociationComebackTime(&frames) : 0;
+
         result.AssociationResultParameters.WMMQoSEnabled = frames.WmmNegotiated;
 
-        TraceDiag("association result: %s, peer status code %u, management "
+        TraceVerbose(TRACE_DRIVER, "association result: %s, peer status code %u, comeback %u TU, management "
                   "cipher %u, WMM %s\n",
                   frames.ReAssociation ? "REASSOCIATION" : "association",
                   (ULONG)frames.PeerStatusCode,
+                  (ULONG)result.AssociationResultParameters.AssociationComebackTime,
                   (ULONG)result.AssociationResultParameters.MulticastMgmtCipherAlgorithm,
                   frames.WmmNegotiated ? "negotiated" : "not negotiated");
 

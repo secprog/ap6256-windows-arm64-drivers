@@ -146,7 +146,7 @@ static VOID WlfcStatus(AP6256_WLFC* W, WLFC_PACKET* P, UINT32 Status)
     P->Debited = FALSE;
     W->Statuses++;
     W->FifoStats[P->Fifo].Statuses++;
-    if (W->Statuses <= 8) TraceDiag("WLFC TX status: tag 0x%08X flags %u fifo %u slot %u\n",
+    if (W->Statuses <= 8) TraceVerbose(TRACE_DRIVER, "WLFC TX status: tag 0x%08X flags %u fifo %u slot %u\n",
         Status, flags, (ULONG)P->Fifo, (ULONG)WLFC_STATUS_SLOT(P->Tag));
 
     if (retired) {
@@ -548,6 +548,57 @@ VOID Ap6256WlfcAbortBegin(PAP6256_DEVICE_CONTEXT Ctx, UINT16 Port, UINT16 Peer)
     w->AbortPort = Port; w->AbortPeer = Peer; w->Aborting = TRUE;
     KeReleaseSpinLock(&w->Lock, irql);
     Ap6256WlfcCancel(Ctx, Port, Peer, NULL);
+}
+
+_Use_decl_annotations_
+NTSTATUS Ap6256WlfcWaitEapol(PAP6256_DEVICE_CONTEXT Ctx, UINT32 IfIndex)
+{
+    AP6256_WLFC* w;
+    NTSTATUS status = STATUS_SUCCESS;
+    ULONGLONG deadline;
+    LARGE_INTEGER interval;
+    KIRQL irql;
+    ULONG i, pending;
+    BOOLEAN running;
+    if (IfIndex >= WLFC_IFS) return STATUS_INVALID_PARAMETER;
+    interval.QuadPart = -10000ll;
+    deadline = KeQueryInterruptTime() + 9500000ull;
+    status = Ap6256NetTxSynchronize(Ctx, deadline);
+    if (!NT_SUCCESS(status)) return status;
+    Ap6256LockAcquire(&Ctx->WlfcLifetimeLock);
+    w = Ctx->Wlfc;
+    if (w == NULL) goto done;
+    for (;;) {
+        pending = 0;
+        KeAcquireSpinLock(&w->Lock, &irql);
+        running = w->Running && w->Enabled;
+        for (i = 0; i < AP6256_WLFC_CAPACITY; i++) {
+            WLFC_PACKET* p = &w->Packets[i];
+            if ((p->State == WlfcQueued || p->State == WlfcWriting ||
+                 p->State == WlfcFlight || p->State == WlfcSuppressed) &&
+                p->IfIndex == IfIndex &&
+                p->Exemption != AP6256_FIPS_BCDC_TX_EXEMPT && p->Length >= 18 &&
+                p->Ethernet[12] == 0x88 && p->Ethernet[13] == 0x8e)
+                pending++;
+        }
+        KeReleaseSpinLock(&w->Lock, irql);
+        if (pending == 0) break;
+        if (!running || !Ctx->DatapathRunning || Ctx->HostTxQuiesced != 0) {
+            status = STATUS_DEVICE_NOT_READY;
+            break;
+        }
+        if (KeQueryInterruptTime() >= deadline) {
+            status = STATUS_IO_TIMEOUT;
+            TraceWarn(TRACE_NETADAPTER, "key update blocked by %u pending EAPOL frame(s) on if %u\n",
+                pending, IfIndex);
+            break;
+        }
+        Ap6256WlfcKick(Ctx);
+        (VOID)KeDelayExecutionThread(KernelMode, FALSE, &interval);
+    }
+done:
+    Ap6256LockRelease(&Ctx->WlfcLifetimeLock);
+    return status;
 }
 
 _Use_decl_annotations_

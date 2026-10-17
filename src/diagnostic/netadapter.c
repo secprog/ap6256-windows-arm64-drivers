@@ -174,9 +174,10 @@ VOID Ap6256NetScanResult(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ PAP6256_BSS Bss)
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetScanComplete(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-                            _In_ NTSTATUS CompletionStatus)
+                            _In_ NTSTATUS CompletionStatus, _In_ UINT16 SyncId)
 {
     UNREFERENCED_PARAMETER(Ctx);
+    UNREFERENCED_PARAMETER(SyncId);
     TraceInfo(TRACE_NETADAPTER, "scan complete 0x%08X\n", CompletionStatus);
 }
 
@@ -200,6 +201,18 @@ VOID Ap6256NetStationFirmwareEvent(PAP6256_DEVICE_CONTEXT Ctx, BOOLEAN Up,
 }
 
 _Use_decl_annotations_
+VOID Ap6256NetStationAssocFailure(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Peer,
+    UINT32 FirmwareGeneration, BOOLEAN ReAssociation, const UCHAR* Response, ULONG Length)
+{
+    UNREFERENCED_PARAMETER(Ctx);
+    UNREFERENCED_PARAMETER(Peer);
+    UNREFERENCED_PARAMETER(FirmwareGeneration);
+    UNREFERENCED_PARAMETER(ReAssociation);
+    UNREFERENCED_PARAMETER(Response);
+    UNREFERENCED_PARAMETER(Length);
+}
+
+_Use_decl_annotations_
 VOID Ap6256NetStationHostCipherEvent(PAP6256_DEVICE_CONTEXT Ctx, BOOLEAN Up,
                                     BOOLEAN TerminalFailure, const UCHAR* Peer,
                                     UINT32 FirmwareGeneration)
@@ -217,6 +230,15 @@ VOID Ap6256NetLinkChange(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ BOOLEAN LinkUp)
 {
     UNREFERENCED_PARAMETER(Ctx);
     TraceInfo(TRACE_NETADAPTER, "link %s\n", LinkUp ? "up" : "down");
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Use_decl_annotations_
+NTSTATUS Ap6256NetTxSynchronize(PAP6256_DEVICE_CONTEXT Ctx, ULONGLONG Deadline)
+{
+    UNREFERENCED_PARAMETER(Ctx);
+    UNREFERENCED_PARAMETER(Deadline);
+    return STATUS_SUCCESS;
 }
 
 _IRQL_requires_max_(DISPATCH_LEVEL)

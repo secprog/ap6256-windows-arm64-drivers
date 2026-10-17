@@ -94,6 +94,12 @@ Ap6256Tal80211ToEthernet(_Inout_updates_bytes_(Length) PUCHAR Buffer,
     payloadOffset = hdrLength;
     payloadLength = Length - hdrLength;
 
+    if (payloadLength == 6 && (da[0] & 1u) != 0) {
+        static const UCHAR iapp[6] = {0, 1, 0xaf, 0x81, 1, 0};
+        if (RtlEqualMemory(Buffer + payloadOffset, iapp, sizeof(iapp)))
+            return STATUS_NOT_SUPPORTED;
+    }
+
     if (payloadLength >= AP6256_LLC_SNAP_LEN &&
         payloadOffset + AP6256_LLC_SNAP_LEN <= Length &&
         Buffer[payloadOffset] == 0xAA &&

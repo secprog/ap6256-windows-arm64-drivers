@@ -205,6 +205,7 @@ Provided without warranty. See LICENSE for the license text.
       <ExcludedFromBuild Condition="'$(Ap6256Model)'=='diagnostic'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\src\common\wifi_ops.c" />
+    <ClCompile Include="..\src\common\native_departure.c" />
     <ClCompile Include="..\src\common\quality.c" />
     <ClCompile Include="..\src\common\wlfc.c" />
     <ClCompile Include="..\src\common\watchdog.c" />
@@ -299,6 +300,9 @@ Provided without warranty. See LICENSE for the license text.
     <ClInclude Include="..\src\common\trace.h" />
     <ClInclude Include="..\src\common\version.h" />
     <ClInclude Include="..\src\common\wifi_ops.h" />
+    <ClInclude Include="..\src\common\association_failure.h" />
+    <ClInclude Include="..\src\common\native_departure.h" />
+    <ClInclude Include="..\src\common\native_departure_patch.h" />
     <ClInclude Include="..\src\common\wlfc.h" />
     <ClInclude Include="..\src\wdi\device_callbacks.h" />
     <ClInclude Include="..\src\wdi\device_context.h" />

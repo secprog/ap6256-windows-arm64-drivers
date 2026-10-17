@@ -11,6 +11,11 @@ transport. The Wi-Fi driver supports WDI, WiFiCx and a diagnostic configuration.
 Firmware patching code and its patch data are included. Firmware images, NVRAM,
 CLM data and Bluetooth HCD files are supplied separately.
 
+Source and a standalone build recipe for the native protected-departure helper
+are in [firmware/native-departure](firmware/native-departure). With LLVM 22.1.2,
+run `LLVM_BIN=/path/to/llvm/bin sh firmware/native-departure/build.sh /outside/output`
+to rebuild its raw code. This does not package vendor firmware or install a driver.
+
 Version state is stored outside the source folder in
 `$env:LOCALAPPDATA\AP6256\SourceVersions`. Use `-VersionCacheDirectory` to
 choose another external cache. Keep that cache to preserve version assignments.

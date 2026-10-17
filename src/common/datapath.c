@@ -131,6 +131,7 @@ VOID Ap6256DatapathStart(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     Ctx->GlomTotalLength = 0;
     Ctx->GlomErrors = 0;
     Ctx->RxNextLength = 0;
+    Ctx->Sdio.StatPrintedAt = 0;
     Ctx->DatapathRunning = TRUE;
 
     heldOff = InterlockedExchange(&Ctx->IsrHeldOff, 0);
@@ -489,6 +490,9 @@ static PCSTR Ap6256EventName(_In_ UINT32 EventType)
     case 40: return "RADIO";
     case 45: return "SCAN_CONFIRM_IND";
     case 46: return "PSK_SUP";
+    case 49: return "ICV_ERROR";
+    case 50: return "UNICAST_DECODE_ERROR";
+    case 51: return "MULTICAST_DECODE_ERROR";
     case 64: return "AP_STARTED";
     case 65: return "DFS_AP_STOP";
     case 66: return "DFS_AP_RESUME";
@@ -649,7 +653,8 @@ static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     }
 
     if ((eventType == BRCMF_E_ESCAN_RESULT && status == BRCMF_E_STATUS_PARTIAL) ||
-        eventType == BRCMF_E_RADIO || eventType == BRCMF_E_PROBERESP_MSG) {
+        eventType == BRCMF_E_RADIO || eventType == BRCMF_E_PROBERESP_MSG ||
+        eventType == BRCMF_E_EAPOL_MSG) {
         TraceVerbose(TRACE_NETADAPTER,
                      "event: %s (%u) status %s (%u) from "
                      "%02X:%02X:%02X:%02X:%02X:%02X, %u byte(s)\n",
@@ -716,10 +721,16 @@ static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                 owner);
             break;
         case BRCMF_E_AUTH:
+            terminal = (BOOLEAN)(status != BRCMF_E_STATUS_SUCCESS);
+            linkEvent = terminal;
+            break;
         case BRCMF_E_ASSOC:
         case BRCMF_E_REASSOC:
             terminal = (BOOLEAN)(status != BRCMF_E_STATUS_SUCCESS);
             linkEvent = terminal;
+            if (terminal && !hostCipherOwner && eventBodyLen >= 16)
+                Ap6256NetStationAssocFailure(Ctx, peer, owner,
+                    (BOOLEAN)(eventType == BRCMF_E_REASSOC), eventBody + 16, eventBodyLen - 16);
             break;
         case BRCMF_E_DEAUTH:
         case BRCMF_E_DEAUTH_IND:
@@ -871,7 +882,7 @@ static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                           eventSync, status);
             }
 
-            Ap6256NetScanComplete(Ctx, completionStatus);
+            Ap6256NetScanComplete(Ctx, completionStatus, eventSync);
         }
         break;
     }
@@ -914,6 +925,17 @@ static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         }
         break;
     }
+
+    case BRCMF_E_ICV_ERROR:
+    case BRCMF_E_UNICAST_DECODE_ERROR:
+    case BRCMF_E_MULTICAST_DECODE_ERROR:
+        TraceVerbose(TRACE_DRIVER, "receive security rejection: event %u if %u bsscfg %u status %u "
+            "reason %u flags 0x%04X peer %02X:%02X:%02X:%02X:%02X:%02X\n",
+            eventType, (ULONG)evt->IfIdx, (ULONG)evt->BssCfgIdx, status,
+            Ap6256ReadBe32((PUCHAR)&evt->Reason), (ULONG)Ap6256ReadBe16((PUCHAR)&evt->Flags),
+            evt->Address[0], evt->Address[1], evt->Address[2], evt->Address[3],
+            evt->Address[4], evt->Address[5]);
+        break;
 
     case BRCMF_E_MIC_ERROR: {
         UINT16 flags = Ap6256ReadBe16((PUCHAR)&evt->Flags);
@@ -978,7 +1000,6 @@ static VOID Ap6256HandleEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     case BRCMF_E_SCAN_CONFIRM_IND:
         TraceInfo(TRACE_NETADAPTER,
                   "event: SCAN_CONFIRM_IND (status %u)\n", status);
-        Ap6256NetScanComplete(Ctx, STATUS_SUCCESS);
         break;
 
     case BRCMF_E_PSK_SUP:
@@ -1148,11 +1169,9 @@ static VOID Ap6256IndicateRx(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         return;
     }
 
-    if (Payload[12] == 0x88 && Payload[13] == 0x8e) {
-        TraceDiag("EAPOL RX bus if %u bytes %u dst %02X:%02X:%02X:%02X:%02X:%02X "
-            "src %02X:%02X:%02X:%02X:%02X:%02X\n", IfIndex, Length,
-            Payload[0], Payload[1], Payload[2], Payload[3], Payload[4], Payload[5],
-            Payload[6], Payload[7], Payload[8], Payload[9], Payload[10], Payload[11]);
+    if (Length == 20 && (Payload[0] & 1u) != 0) {
+        static const UCHAR iapp[6] = {0, 1, 0xaf, 0x81, 1, 0};
+        if (RtlEqualMemory(Payload + 14, iapp, sizeof(iapp))) return;
     }
 
     if (IfIndex != 0 && (!Ctx->Go.FirmwareReady || IfIndex != Ctx->Go.IfIndex)) return;

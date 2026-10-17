@@ -105,6 +105,7 @@ Ap6256WdiAllocateAdapter(NDIS_HANDLE NdisMiniportHandle,
     Ap6256LockInit(&ctx->TdlsLock);
     Ap6256LockInit(&ctx->PnoLock);
     Ap6256LockInit(&ctx->WlfcLifetimeLock);
+    Ap6256LockInit(&ctx->NativeKeyLock);
     KeInitializeSpinLock(&ctx->Sdio.TxStateLock);
     KeInitializeSpinLock(&ctx->HostFipsLock);
     KeInitializeMutex(&ctx->HostCipherControlLock, 0);
@@ -437,8 +438,12 @@ _Use_decl_annotations_
 static VOID
 Ap6256NdisShutdownEx(NDIS_HANDLE MiniportAdapterContext, NDIS_SHUTDOWN_ACTION ShutdownAction)
 {
-    UNREFERENCED_PARAMETER(MiniportAdapterContext);
-    UNREFERENCED_PARAMETER(ShutdownAction);
+    PAP6256_DEVICE_CONTEXT ctx = (PAP6256_DEVICE_CONTEXT)MiniportAdapterContext;
+
+    if (ShutdownAction != NdisShutdownPowerOff || KeGetCurrentIrql() != PASSIVE_LEVEL ||
+        ctx == NULL)
+        return;
+    Ap6256TearDownChip(ctx, FALSE);
 }
 
 _Use_decl_annotations_

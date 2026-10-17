@@ -437,6 +437,7 @@ static NTSTATUS Ap6256WifiConfigureEvents(_In_ PAP6256_DEVICE_CONTEXT Ctx)
         BRCMF_E_PRE_ASSOC_IND, BRCMF_E_PRE_REASSOC_IND,
 
         BRCMF_E_PRUNE, BRCMF_E_MIC_ERROR, BRCMF_E_TXFAIL,
+        BRCMF_E_ICV_ERROR, BRCMF_E_UNICAST_DECODE_ERROR, BRCMF_E_MULTICAST_DECODE_ERROR,
 
         BRCMF_E_PSK_SUP, BRCMF_E_EAPOL_MSG, BRCMF_E_PMKID_CACHE,
 
@@ -832,12 +833,12 @@ BOOLEAN Ap6256WifiEscanEventIsCurrent(PAP6256_DEVICE_CONTEXT Ctx,
     *SyncId = 0;
     if (EventData == NULL ||
         Length < (ULONG)FIELD_OFFSET(BRCMF_ESCAN_RESULT, BssInfo)) {
-        return TRUE;
+        return FALSE;
     }
 
     eventSync = ((const BRCMF_ESCAN_RESULT*)EventData)->SyncId;
     *SyncId = eventSync;
-    return (BOOLEAN)(eventSync == (UINT16)Ctx->ScanSyncId);
+    return (BOOLEAN)(eventSync != 0 && eventSync == (UINT16)Ctx->ScanSyncId);
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -897,12 +898,94 @@ NTSTATUS Ap6256WifiReassociate(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
+static BOOLEAN Ap6256WifiHasNativeKeys(PAP6256_DEVICE_CONTEXT Ctx)
+{
+    ULONG slot;
+    BOOLEAN found;
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    found = Ctx->NativeDeparturePending;
+    for (slot = 0; slot < AP6256_NATIVE_KEY_SLOTS; ++slot) {
+        if (Ctx->NativeKeys[slot].Valid) {
+            found = TRUE;
+            break;
+        }
+    }
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
+    return found;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID Ap6256WifiForgetNativeKeys(_In_ PAP6256_DEVICE_CONTEXT Ctx)
+{
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    RtlZeroMemory(Ctx->NativeKeys, sizeof(Ctx->NativeKeys));
+    Ctx->NativeDeparturePending = FALSE;
+    Ctx->NativeDepartureToken = 0;
+    Ctx->NativeDepartureCommitted = FALSE;
+    Ctx->NativeDepartureReason = 0;
+    RtlZeroMemory(Ctx->NativeDeparturePeer, sizeof(Ctx->NativeDeparturePeer));
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+static NTSTATUS Ap6256WifiWriteNativeKey(PAP6256_DEVICE_CONTEXT Ctx,
+    UINT32 IfIndex, BRCMF_WSEC_KEY* Key, BOOLEAN Pairwise, BOOLEAN Management)
+{
+    ULONG index;
+    LONG slot = -1, available = -1;
+    NTSTATUS status;
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    if (IfIndex == 0 && Ctx->NativeDeparturePending) {
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return STATUS_DEVICE_BUSY;
+    }
+    if (IfIndex == 0) {
+        for (index = 0; index < AP6256_NATIVE_KEY_SLOTS; ++index) {
+            AP6256_NATIVE_KEY_REF* ref = &Ctx->NativeKeys[index];
+            if (!ref->Valid) {
+                if (available < 0) available = (LONG)index;
+            } else if (ref->KeyId == Key->Index && ref->Pairwise == Pairwise &&
+                ref->Management == Management &&
+                RtlEqualMemory(ref->PeerAddress, Key->PeerAddress, sizeof(ref->PeerAddress))) {
+                slot = (LONG)index;
+                break;
+            }
+        }
+        if (Key->Length && slot < 0) slot = available;
+        if (Key->Length && slot < 0) {
+            Ap6256LockRelease(&Ctx->NativeKeyLock);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+    }
+    status = Ap6256BcdcSetDcmdIf(Ctx, IfIndex, BRCMF_C_SET_KEY, Key, sizeof(*Key));
+    if (!NT_SUCCESS(status)) {
+        status = Ap6256BcdcSetIovarIf(Ctx, IfIndex, "wsec_key", Key, sizeof(*Key));
+    }
+    if (NT_SUCCESS(status) && IfIndex == 0 && slot >= 0) {
+        AP6256_NATIVE_KEY_REF* ref = &Ctx->NativeKeys[slot];
+        RtlZeroMemory(ref, sizeof(*ref));
+        if (Key->Length) {
+            ref->KeyId = Key->Index;
+            ref->Pairwise = Pairwise;
+            ref->Management = Management;
+            RtlCopyMemory(ref->PeerAddress, Key->PeerAddress, sizeof(ref->PeerAddress));
+            ref->Valid = TRUE;
+        }
+    }
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
+    return status;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiDisconnectWithReason(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                                         _In_reads_opt_(6) const UCHAR* Bssid,
                                         _In_ UINT32 ReasonCode)
 {
     NTSTATUS status = STATUS_NOT_SUPPORTED;
+    LARGE_INTEGER delay;
     BOOLEAN hostHandled = FALSE;
+    BOOLEAN nativeHandled = FALSE;
+    BOOLEAN wasFips = Ap6256FipsActive(Ctx, 0);
 
     Ap6256WlfcCancel(Ctx, AP6256_STATION_PORT, AP6256_WLFC_ANY, NULL);
     status = Ap6256HostCipherDisconnect(Ctx, 0, Bssid, ReasonCode, &hostHandled);
@@ -919,6 +1002,16 @@ NTSTATUS Ap6256WifiDisconnectWithReason(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     (VOID)Ap6256HostCipherEnd(Ctx, 0, FALSE);
 
     (VOID)Ap6256FipsRetire(Ctx, 0);
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    if (!wasFips) {
+        status = Ap6256NativeDeparture(Ctx, Bssid, ReasonCode, &nativeHandled);
+        if (!NT_SUCCESS(status)) {
+            Ap6256LockRelease(&Ctx->NativeKeyLock);
+            return status;
+        }
+        if (nativeHandled) goto cleanup;
+    }
+    status = STATUS_NOT_SUPPORTED;
 
     if (Bssid != NULL && ReasonCode != 0) {
         BRCMF_SCB_VAL scb;
@@ -926,9 +1019,6 @@ NTSTATUS Ap6256WifiDisconnectWithReason(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         RtlZeroMemory(&scb, sizeof(scb));
         scb.Value = ReasonCode;
         RtlCopyMemory(scb.Address, Bssid, sizeof(scb.Address));
-
-        (VOID)Ap6256BcdcSetDcmd(Ctx, BRCMF_C_SCB_DEAUTHORIZE,
-                                (PVOID)(ULONG_PTR)Bssid, 6);
 
         status = Ap6256BcdcSetDcmd(Ctx,
                                    BRCMF_C_SCB_DEAUTHENTICATE_FOR_REASON,
@@ -943,12 +1033,32 @@ NTSTATUS Ap6256WifiDisconnectWithReason(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (!NT_SUCCESS(status)) {
         status = Ap6256BcdcSetDcmd(Ctx, BRCMF_C_DISASSOC, NULL, 0);
     }
-
-    Ap6256WifiClearSecurityState(Ctx);
+    if (!NT_SUCCESS(status)) {
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return status;
+    }
+    Ctx->NativeDeparturePending = TRUE;
+    delay.QuadPart = -5000000LL;
+    status = KeDelayExecutionThread(KernelMode, FALSE, &delay);
+    TraceVerbose(TRACE_DRIVER, "station disconnect departure drain: reason %u, 500 ms -> 0x%08X\n",
+        ReasonCode, status);
+    if (status != STATUS_SUCCESS) {
+        if (NT_SUCCESS(status)) status = STATUS_IO_TIMEOUT;
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return status;
+    }
+    Ctx->NativeDeparturePending = FALSE;
+cleanup:
+    if (Bssid != NULL && ReasonCode != 0) {
+        (VOID)Ap6256BcdcSetDcmd(Ctx, BRCMF_C_SCB_DEAUTHORIZE,
+            (PVOID)(ULONG_PTR)Bssid, 6);
+    }
+    status = Ap6256WifiClearSecurityState(Ctx);
 
     Ctx->FirmwareLinkUp = FALSE;
     Ctx->SupplicantComplete = FALSE;
     Ctx->ConnectionRequiresSupplicant = FALSE;
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
     return status;
 }
 
@@ -1483,11 +1593,58 @@ NTSTATUS Ap6256WifiUp(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256WifiLeaveForPowerDown(_In_ PAP6256_DEVICE_CONTEXT Ctx)
+{
+    NTSTATUS status;
+    LARGE_INTEGER delay;
+    BOOLEAN nativeHandled = FALSE;
+
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
+        Ctx->FirmwareState != Ap6256FwRunning || !Ctx->DatapathRunning ||
+        Ctx->Sdio.BusInterface == NULL || Ctx->Sdio.Sleeping ||
+        InterlockedCompareExchange(&Ctx->FirmwareHalted, 0, 0) != 0)
+        return STATUS_DEVICE_NOT_READY;
+    if (Ap6256HostCipherStoreActive(&Ctx->HostCipherStore, 0) ||
+        Ap6256FipsActive(Ctx, 0))
+        return STATUS_NOT_SUPPORTED;
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    if (!Ctx->FirmwareLinkUp && !Ctx->NativeDeparturePending) {
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return STATUS_SUCCESS;
+    }
+
+    Ap6256WlfcCancel(Ctx, AP6256_STATION_PORT, AP6256_WLFC_ANY, NULL);
+    status = Ap6256NativeDeparture(Ctx, NULL, 0, &nativeHandled);
+    if (nativeHandled || !NT_SUCCESS(status)) {
+        if (nativeHandled && NT_SUCCESS(status)) status = Ap6256WifiClearSecurityState(Ctx);
+        TraceVerbose(TRACE_DRIVER, "native protected departure before power down: 0x%08X\n", status);
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return status;
+    }
+    status = Ctx->NativeDeparturePending ? STATUS_SUCCESS :
+        Ap6256BcdcSetDcmd(Ctx, BRCMF_C_DISASSOC, NULL, 0);
+    if (NT_SUCCESS(status)) {
+        Ctx->NativeDeparturePending = TRUE;
+        delay.QuadPart = -5000000LL;
+        status = KeDelayExecutionThread(KernelMode, FALSE, &delay);
+        if (status == STATUS_SUCCESS) Ctx->NativeDeparturePending = FALSE;
+        else if (NT_SUCCESS(status)) status = STATUS_IO_TIMEOUT;
+    }
+    TraceVerbose(TRACE_DRIVER, "station departure before power down: 0x%08X, transmit grace %u ms\n",
+        status, NT_SUCCESS(status) ? 500u : 0u);
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
+    return status;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiSetRadioState(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                                  _In_ BOOLEAN Enabled)
 {
     NTSTATUS status;
     UINT32 radio;
+
+    if (!Enabled)
+        (VOID)Ap6256WifiLeaveForPowerDown(Ctx);
 
     radio = (WL_RADIO_SW_DISABLE << 16) | (Enabled ? 0u : WL_RADIO_SW_DISABLE);
     (VOID)Ap6256BcdcSetDcmd(Ctx, BRCMF_C_SET_RADIO, &radio, sizeof(radio));
@@ -1541,7 +1698,8 @@ NTSTATUS Ap6256EncodeChanspec(_In_ UINT8 IoType,
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 static NTSTATUS Ap6256WifiScanStartInternal(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-    _In_ const AP6256_SCAN_PARAMS* Params)
+    _In_ const AP6256_SCAN_PARAMS* Params,
+                                           _In_ UINT16 SyncId)
 {
     BRCMF_ESCAN_PARAMS* escan;
     PUCHAR ssidCursor;
@@ -1551,7 +1709,6 @@ static NTSTATUS Ap6256WifiScanStartInternal(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     ULONG len;
     ULONG index;
     ULONG trailingSsidCount;
-    LONG syncId;
     NTSTATUS status;
 
     if (Params == NULL || Params->SsidCount > AP6256_SCAN_SSID_MAX ||
@@ -1578,9 +1735,11 @@ static NTSTATUS Ap6256WifiScanStartInternal(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     RtlZeroMemory(escan, len);
     escan->Version = BRCMF_ESCAN_REQ_VERSION;
     escan->Action = WL_ESCAN_ACTION_START;
-    syncId = InterlockedIncrement(&Ctx->ScanSyncId);
-    if ((UINT16)syncId == 0) syncId = InterlockedIncrement(&Ctx->ScanSyncId);
-    escan->SyncId = (UINT16)syncId;
+    if (!SyncId || SyncId != (UINT16)Ctx->ScanSyncId) {
+        ExFreePoolWithTag(escan, AP6256_POOL_TAG);
+        return STATUS_CANCELLED;
+    }
+    escan->SyncId = SyncId;
 
     RtlCopyMemory(escan->Params.Bssid, Params->Bssid, sizeof(escan->Params.Bssid));
     escan->Params.BssType = DOT11_BSSTYPE_ANY;
@@ -1650,9 +1809,10 @@ done:
 }
 
 _Use_decl_annotations_
-NTSTATUS Ap6256WifiScanStart(PAP6256_DEVICE_CONTEXT Ctx, const AP6256_SCAN_PARAMS* Params)
+NTSTATUS Ap6256WifiScanStart(PAP6256_DEVICE_CONTEXT Ctx, const AP6256_SCAN_PARAMS* Params,
+                            UINT16 SyncId)
 {
-    return Ap6256WifiScanStartInternal(Ctx, Params);
+    return Ap6256WifiScanStartInternal(Ctx, Params, SyncId);
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -1906,6 +2066,10 @@ static NTSTATUS Ap6256WifiConnectCommon(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (!NT_SUCCESS(status)) return status;
     status = Ap6256FipsStop(Ctx, 0);
     if (!NT_SUCCESS(status)) return status;
+    if (!Ctx->FirmwareLinkUp && Ap6256WifiHasNativeKeys(Ctx)) {
+        status = Ap6256WifiClearSecurityState(Ctx);
+        if (!NT_SUCCESS(status)) return status;
+    }
     status = Ap6256WifiSetStationRsn(Ctx, Params);
     if (!NT_SUCCESS(status)) return status;
     if (hostCipher) {
@@ -2356,19 +2520,44 @@ VOID Ap6256WifiResetFirmwareCounters(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
-VOID Ap6256WifiClearSecurityState(_In_ PAP6256_DEVICE_CONTEXT Ctx)
+NTSTATUS Ap6256WifiClearSecurityState(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 {
-    UINT32 zero = 0;
+    ULONG slot;
+    NTSTATUS status = STATUS_SUCCESS, step;
     UCHAR pmkids[AP6256_PMKID_CLEAR_BYTES];
 
-    (VOID)Ap6256BcdcSetIovar(Ctx, "key_remove_all", NULL, 0);
-    (VOID)Ap6256BcdcSetDcmd(Ctx, BRCMF_C_SET_KEY_PRIMARY, &zero, sizeof(zero));
-    (VOID)Ap6256WifiSetMfpWsecBit(Ctx, FALSE);
-
-    (VOID)Ap6256WifiSetBssWmm(Ctx, TRUE);
-
+    if (Ap6256HostCipherStoreActive(&Ctx->HostCipherStore, 0) || Ap6256FipsActive(Ctx, 0))
+        return STATUS_NOT_SUPPORTED;
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    if (Ctx->NativeDeparturePending && !Ctx->NativeDepartureCommitted) {
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return STATUS_DEVICE_BUSY;
+    }
+    Ctx->NativeDeparturePending = FALSE;
+    for (slot = 0; slot < AP6256_NATIVE_KEY_SLOTS; ++slot) {
+        AP6256_NATIVE_KEY_REF ref = Ctx->NativeKeys[slot];
+        if (!ref.Valid) continue;
+        step = ref.Management ? Ap6256WifiDeleteBipKeyIf(Ctx, 0, ref.KeyId, ref.PeerAddress) :
+            Ap6256WifiDeleteCcmpKeyIf(Ctx, 0, ref.KeyId, ref.Pairwise, ref.PeerAddress);
+        if (!NT_SUCCESS(step) && NT_SUCCESS(status)) status = step;
+    }
+    if (NT_SUCCESS(status)) status = Ap6256WifiSetMfpWsecBit(Ctx, FALSE);
+    step = Ap6256WifiSetBssWmm(Ctx, TRUE);
+    if (!NT_SUCCESS(step) && NT_SUCCESS(status)) status = step;
     RtlZeroMemory(pmkids, sizeof(pmkids));
-    (VOID)Ap6256BcdcSetIovar(Ctx, "pmkid_info", pmkids, sizeof(pmkids));
+    step = Ap6256BcdcSetIovar(Ctx, "pmkid_info", pmkids, sizeof(pmkids));
+    if (!NT_SUCCESS(step) && NT_SUCCESS(status)) status = step;
+    if (Ctx->NativeDepartureCommitted) {
+        if (NT_SUCCESS(status)) {
+            Ctx->NativeDepartureToken = 0;
+            Ctx->NativeDepartureCommitted = FALSE;
+            Ctx->NativeDepartureReason = 0;
+            RtlZeroMemory(Ctx->NativeDeparturePeer, sizeof(Ctx->NativeDeparturePeer));
+        } else Ctx->NativeDeparturePending = TRUE;
+    }
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
+    TraceVerbose(TRACE_DRIVER, "station security cleanup: tracked keys and PMF -> 0x%08X\n", status);
+    return status;
 }
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -2410,6 +2599,9 @@ NTSTATUS Ap6256WifiAddBipKey(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     }
     if (Ap6256FipsActive(Ctx, Key->IfIndex)) return STATUS_NOT_SUPPORTED;
 
+    status = Ap6256WlfcWaitEapol(Ctx, Key->IfIndex);
+    if (!NT_SUCCESS(status)) return status;
+
     RtlZeroMemory(&firmwareKey, sizeof(firmwareKey));
     firmwareKey.Index = Key->KeyId;
     firmwareKey.Length = Key->KeyLength;
@@ -2424,17 +2616,10 @@ NTSTATUS Ap6256WifiAddBipKey(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         ((UINT32)Key->Ipn[3] << 8) | Key->Ipn[2];
     firmwareKey.RxIvLow = (UINT16)(((UINT16)Key->Ipn[1] << 8) | Key->Ipn[0]);
 
-    status = Ap6256BcdcSetDcmdIf(Ctx, Key->IfIndex, BRCMF_C_SET_KEY, &firmwareKey,
-                               sizeof(firmwareKey));
-    if (!NT_SUCCESS(status)) {
-        TraceWarn(TRACE_NETADAPTER,
-                  "SET_KEY refused the IGTK 0x%08X; trying the wsec_key "
-                  "iovar\n", status);
-        status = Ap6256BcdcSetIovarIf(Ctx, Key->IfIndex, "wsec_key", &firmwareKey,
-                                    sizeof(firmwareKey));
-    }
+    status = Ap6256WifiWriteNativeKey(Ctx, Key->IfIndex, &firmwareKey, FALSE, TRUE);
 
-    TraceDiag("IGTK install if %u id %u -> 0x%08X\n", Key->IfIndex, Key->KeyId, status);
+    TraceVerbose(TRACE_DRIVER, "IGTK command t100ns %llu if %u id %u -> 0x%08X\n",
+        KeQueryInterruptTime(), Key->IfIndex, Key->KeyId, status);
     if (NT_SUCCESS(status) && Key->IfIndex == 0)
         Ap6256WifiSeedGroupKey(Ctx, Key->KeyId, TRUE, TRUE, Key->Key, Key->Ipn);
     RtlSecureZeroMemory(&firmwareKey, sizeof(firmwareKey));
@@ -2456,10 +2641,7 @@ NTSTATUS Ap6256WifiDeleteBipKeyIf(PAP6256_DEVICE_CONTEXT Ctx, UINT32 IfIndex,
     if (RtlEqualMemory(PeerAddress, zeroAddress, sizeof(zeroAddress)))
         firmwareKey.Flags = BRCMF_PRIMARY_KEY;
 
-    status = Ap6256BcdcSetDcmdIf(Ctx, IfIndex, BRCMF_C_SET_KEY,
-        &firmwareKey, sizeof(firmwareKey));
-    if (!NT_SUCCESS(status)) status = Ap6256BcdcSetIovarIf(Ctx, IfIndex,
-        "wsec_key", &firmwareKey, sizeof(firmwareKey));
+    status = Ap6256WifiWriteNativeKey(Ctx, IfIndex, &firmwareKey, FALSE, TRUE);
     if (NT_SUCCESS(status) && IfIndex == 0)
         Ap6256WifiSeedGroupKey(Ctx, (UINT32)KeyId, TRUE, FALSE, NULL, NULL);
     TraceDiag("IGTK delete if %u id %u -> 0x%08X\n", IfIndex, KeyId, status);
@@ -2514,6 +2696,9 @@ NTSTATUS Ap6256WifiAddCcmpKey(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             Key->PeerAddress, sizeof(Key->PeerAddress)) : STATUS_SUCCESS;
     }
 
+    status = Ap6256WlfcWaitEapol(Ctx, Key->IfIndex);
+    if (!NT_SUCCESS(status)) return status;
+
     RtlZeroMemory(&firmwareKey, sizeof(firmwareKey));
     firmwareKey.Index = Key->KeyId;
     firmwareKey.Length = sizeof(Key->Key);
@@ -2535,16 +2720,11 @@ NTSTATUS Ap6256WifiAddCcmpKey(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         firmwareKey.IvInitialized = 1;
     }
 
-    status = Ap6256BcdcSetDcmdIf(Ctx, Key->IfIndex, BRCMF_C_SET_KEY, &firmwareKey,
-                               sizeof(firmwareKey));
-    if (!NT_SUCCESS(status)) {
-        TraceWarn(TRACE_NETADAPTER,
-                  "SET_KEY refused 0x%08X; trying the wsec_key iovar\n",
-                  status);
-        status = Ap6256BcdcSetIovarIf(Ctx, Key->IfIndex, "wsec_key", &firmwareKey,
-                                    sizeof(firmwareKey));
-    }
+    status = Ap6256WifiWriteNativeKey(Ctx, Key->IfIndex, &firmwareKey, Key->Pairwise, FALSE);
 
+    TraceVerbose(TRACE_DRIVER, "CCMP key command t100ns %llu if %u id %u pairwise %u rxiv %u -> 0x%08X\n",
+        KeQueryInterruptTime(), Key->IfIndex, Key->KeyId, (ULONG)Key->Pairwise,
+        (ULONG)Key->ReceiveSequenceValid, status);
     if (NT_SUCCESS(status) && Key->Pairwise) {
         status = Ap6256BcdcSetDcmdIf(Ctx, Key->IfIndex, BRCMF_C_SCB_AUTHORIZE,
                                     firmwareKey.PeerAddress,
@@ -2613,6 +2793,11 @@ NTSTATUS Ap6256WifiDeleteCcmpKeyIf(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ UINT32 
         return Pairwise ? Ap6256BcdcSetDcmdIf(Ctx, IfIndex, BRCMF_C_SCB_DEAUTHORIZE,
             (PVOID)(ULONG_PTR)PeerAddress, 6) : STATUS_SUCCESS;
     }
+    Ap6256LockAcquire(&Ctx->NativeKeyLock);
+    if (IfIndex == 0 && Ctx->NativeDeparturePending) {
+        Ap6256LockRelease(&Ctx->NativeKeyLock);
+        return STATUS_DEVICE_BUSY;
+    }
     RtlZeroMemory(&firmwareKey, sizeof(firmwareKey));
     firmwareKey.Index = KeyId;
     if (Pairwise) {
@@ -2626,12 +2811,8 @@ NTSTATUS Ap6256WifiDeleteCcmpKeyIf(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ UINT32 
                                 (PVOID)(ULONG_PTR)PeerAddress, 6);
     }
 
-    status = Ap6256BcdcSetDcmdIf(Ctx, IfIndex, BRCMF_C_SET_KEY, &firmwareKey,
-                               sizeof(firmwareKey));
-    if (!NT_SUCCESS(status)) {
-        status = Ap6256BcdcSetIovarIf(Ctx, IfIndex, "wsec_key", &firmwareKey,
-                                    sizeof(firmwareKey));
-    }
+    status = Ap6256WifiWriteNativeKey(Ctx, IfIndex, &firmwareKey, Pairwise, FALSE);
+    Ap6256LockRelease(&Ctx->NativeKeyLock);
     if (NT_SUCCESS(status) && !Pairwise && IfIndex == 0)
         Ap6256WifiSeedGroupKey(Ctx, (UINT32)KeyId, FALSE, FALSE, NULL, NULL);
     return status;
@@ -2838,7 +3019,7 @@ NTSTATUS Ap6256WifiStopAp(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 
     (VOID)Ap6256WifiScanAbort(Ctx);
 
-    Ap6256WifiClearSecurityState(Ctx);
+    (VOID)Ap6256WifiClearSecurityState(Ctx);
 
     status = Ap6256WifiRadioUpDown(Ctx, FALSE);
 
@@ -3404,7 +3585,7 @@ VOID Ap6256WifiTraceApBss(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ UINT32 IfIndex)
     if (buffer == NULL) return;
     status = Ap6256WifiQueryBssInfo(Ctx, IfIndex, buffer, AP6256_BSS_INFO_MAX, &info);
     if (NT_SUCCESS(status)) {
-        TraceDiag("hotspot: BSS if %u BSSID %02X:%02X:%02X:%02X:%02X:%02X capability 0x%04X privacy %u SSID bytes %u\n",
+        TraceVerbose(TRACE_DRIVER, "hotspot: cached BSS if %u BSSID %02X:%02X:%02X:%02X:%02X:%02X base capability 0x%04X base privacy %u SSID bytes %u; transmitted capability is finalized separately\n",
                   IfIndex, info->Bssid[0], info->Bssid[1], info->Bssid[2],
                   info->Bssid[3], info->Bssid[4], info->Bssid[5],
                   (ULONG)info->Capability, (ULONG)((info->Capability & 0x10u) != 0),
@@ -3854,6 +4035,10 @@ static NTSTATUS Ap6256WifiProgramNetworkListOffload(_In_ PAP6256_DEVICE_CONTEXT 
     NTSTATUS status;
 
     if (Params->NetworkCount > AP6256_NLO_NETWORK_MAX) return STATUS_INVALID_PARAMETER;
+    if (Params->WindowsRequest) {
+        LONG mode = InterlockedCompareExchange(&Ctx->NloScanMode, 0, 0);
+        if (mode != 0 && (UINT32)mode != AP6256_NLO_SCAN_AUTO) return STATUS_NOT_SUPPORTED;
+    }
     if (Params->Enable && Params->NetworkCount != 0) {
         if (Params->ScanPeriodSeconds == 0 || Params->ScanPeriodSeconds > MAXLONG / 1000)
             return STATUS_INVALID_PARAMETER;
@@ -4697,19 +4882,77 @@ NTSTATUS Ap6256WifiArmRssiEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     return status;
 }
 
+_Use_decl_annotations_
+NTSTATUS Ap6256WifiValidateUnreachableThreshold(UINT32 ThresholdMs)
+{
+    if (ThresholdMs < 1000u || ThresholdMs % 1000u != 0)
+        return STATUS_NOT_SUPPORTED;
+    return STATUS_SUCCESS;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+static NTSTATUS Ap6256WifiReadBeaconTimeout(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+                                          _Out_ UINT32* Timeout)
+{
+    AP6256_BCDC_QUERY_RESULT result = {0};
+    *Timeout = 0;
+    NTSTATUS status = Ap6256BcdcGetIovarResultIf(Ctx, 0, "bcn_timeout",
+        Timeout, sizeof(*Timeout), &result);
+    if (NT_SUCCESS(status) && (!result.FirmwareReply || result.FirmwareError ||
+        result.PayloadLength < sizeof(*Timeout))) status = STATUS_DEVICE_PROTOCOL_ERROR;
+    if (!NT_SUCCESS(status))
+        TraceWarn(TRACE_NETADAPTER,
+            "beacon timeout GET not verified: status 0x%08X reply %u error %u firmware %d payload %u byte(s)\n",
+            status, (UINT32)result.FirmwareReply, (UINT32)result.FirmwareError,
+            result.FirmwareStatus, result.PayloadLength);
+    else
+        TraceVerbose(TRACE_NETADAPTER, "beacon timeout readback: %u seconds, payload %u byte(s)\n",
+            *Timeout, result.PayloadLength);
+    return status;
+}
+
+_Use_decl_annotations_
+NTSTATUS Ap6256WifiApplyUnreachableThreshold(PAP6256_DEVICE_CONTEXT Ctx, UINT32 ThresholdMs)
+{
+    UINT32 timeout = ThresholdMs / 1000u, previous = 0, actual = 0;
+    NTSTATUS status = Ap6256WifiValidateUnreachableThreshold(ThresholdMs);
+    NTSTATUS cleanup;
+    if (!NT_SUCCESS(status)) return status;
+    status = Ap6256WifiReadBeaconTimeout(Ctx, &previous);
+    if (!NT_SUCCESS(status)) return status;
+    status = Ap6256BcdcSetIovar(Ctx, "bcn_timeout", &timeout, sizeof(timeout));
+    if (NT_SUCCESS(status)) {
+        status = Ap6256WifiReadBeaconTimeout(Ctx, &actual);
+        if (NT_SUCCESS(status) && actual != timeout) status = STATUS_DEVICE_PROTOCOL_ERROR;
+    }
+    if (NT_SUCCESS(status)) return status;
+    cleanup = Ap6256BcdcSetIovar(Ctx, "bcn_timeout", &previous, sizeof(previous));
+    if (NT_SUCCESS(cleanup)) {
+        cleanup = Ap6256WifiReadBeaconTimeout(Ctx, &actual);
+        if (NT_SUCCESS(cleanup) && actual != previous) cleanup = STATUS_DEVICE_PROTOCOL_ERROR;
+    }
+    if (!NT_SUCCESS(cleanup))
+        TraceWarn(TRACE_NETADAPTER, "beacon timeout rollback not confirmed 0x%08X\n", cleanup);
+    return status;
+}
+
+_Use_decl_annotations_
+NTSTATUS Ap6256WifiRestoreUnreachableThreshold(PAP6256_DEVICE_CONTEXT Ctx)
+{
+    LONG timeout = InterlockedCompareExchange(&Ctx->BeaconLossTimeoutSeconds, 0, 0);
+    if (timeout == 0) return STATUS_SUCCESS;
+    if (timeout < 0 || (UINT32)timeout > MAXULONG / 1000u) return STATUS_INVALID_DEVICE_STATE;
+    return Ap6256WifiApplyUnreachableThreshold(Ctx, (UINT32)timeout * 1000u);
+}
+
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256WifiArmRoamTriggers(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 {
     INT32 trigger = AP6256_ROAM_RSSI_DEFAULT_DBM;
-    UINT32 timeout = AP6256_BEACON_LOSS_TIMEOUT_SECONDS, actual = 0;
-    AP6256_BCDC_QUERY_RESULT result;
-    NTSTATUS status = Ap6256BcdcSetIovar(Ctx, "bcn_timeout", &timeout, sizeof(timeout));
-    if (NT_SUCCESS(status)) {
-        status = Ap6256BcdcGetIovarResultIf(Ctx, 0, "bcn_timeout", &actual, sizeof(actual), &result);
-        if (NT_SUCCESS(status) && (!result.FirmwareReply || result.FirmwareError ||
-            result.PayloadLength < sizeof(actual) || actual != timeout))
-            status = STATUS_DEVICE_PROTOCOL_ERROR;
-    }
+    LONG configured = InterlockedCompareExchange(&Ctx->BeaconLossTimeoutSeconds, 0, 0);
+    UINT32 timeout = configured > 0 ? (UINT32)configured : AP6256_BEACON_LOSS_TIMEOUT_SECONDS;
+    NTSTATUS status = configured != 0 ? Ap6256WifiRestoreUnreachableThreshold(Ctx) :
+        Ap6256WifiApplyUnreachableThreshold(Ctx, timeout * 1000u);
     if (!NT_SUCCESS(status))
         TraceWarn(TRACE_NETADAPTER, "beacon loss timeout %u seconds not confirmed 0x%08X\n",
             timeout, status);

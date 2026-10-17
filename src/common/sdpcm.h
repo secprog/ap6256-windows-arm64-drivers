@@ -236,6 +236,9 @@ typedef struct _BRCMF_EVENT_MSG {
 #define BRCMF_E_START               2
 #define BRCMF_E_AUTH_IND            4
 #define BRCMF_E_MIC_ERROR           17
+#define BRCMF_E_ICV_ERROR           49
+#define BRCMF_E_UNICAST_DECODE_ERROR 50
+#define BRCMF_E_MULTICAST_DECODE_ERROR 51
 #define BRCMF_E_TXFAIL              20
 #define BRCMF_E_PMKID_CACHE         21
 #define BRCMF_E_PRUNE               23

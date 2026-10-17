@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "association_failure.h"
+
 #define AP6256_SAE_QUEUE_DEPTH 8u
 typedef struct _AP6256_SAE_EVENT {
     LONG Generation;
@@ -36,4 +38,6 @@ typedef struct _AP6256_AUTH_STATE {
     UCHAR SaeFirmwarePeer[6];
     BOOLEAN SaeNeedsAbort;
     LONGLONG SaeCachedDeadlineMs;
+    AP6256_ASSOC_FAILURE AssocFailure;
+    BOOLEAN AssocComebackPending;
 } AP6256_AUTH_STATE;

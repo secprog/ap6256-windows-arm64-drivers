@@ -909,9 +909,9 @@ Ap6256WdiRxIndicate(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 
         if (ethertype == 0x888Eu) {
             if (Ctx->Go.Mode == AP6256_WDI_OPMODE_P2P_GO && IfIndex == Ctx->Go.IfIndex)
-                TraceDiag("hotspot: EAPOL RX if %u peer %u bytes %u\n", IfIndex, (ULONG)route.PeerId, Length);
+                TraceVerbose(TRACE_DRIVER, "hotspot: EAPOL RX if %u peer %u bytes %u\n", IfIndex, (ULONG)route.PeerId, Length);
 
-            TraceInfo(TRACE_NETADAPTER,
+            TraceVerbose(TRACE_NETADAPTER,
                       "rx EAPOL #%d (frame %d, %u bytes) from "
                       "%02X:%02X:%02X:%02X:%02X:%02X\n",
                       InterlockedIncrement(&Ctx->TalRxEapol), count, Length,
@@ -983,7 +983,10 @@ Ap6256WdiRxIndicate(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 
     if (!raw) Ap6256TraceHotspotPacket(Ctx, Ap6256GoDataRxQueued, IfIndex, Frame, Length, STATUS_SUCCESS);
     if (route.Ready) {
-        if (Ctx->RxBatching && ++Ctx->RxBatched < AP6256_RX_BATCH) {
+        if (!raw && Frame[12] == 0x88 && Frame[13] == 0x8e) {
+            Ctx->RxBatched = 0;
+            Ap6256TalNotifyRxWaiting(Ctx, WDI_RX_INDICATION_PASSIVE, &wifiStatus);
+        } else if (Ctx->RxBatching && ++Ctx->RxBatched < AP6256_RX_BATCH) {
 
         } else {
             Ctx->RxBatched = 0;
@@ -1239,14 +1242,14 @@ Ap6256TalPackFrame(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         if (Ctx->Go.Mode == AP6256_WDI_OPMODE_P2P_GO && ifIndex == Ctx->Go.IfIndex) {
             ULONG keyInfo = ethLength >= 21 && payload[15] == 3 ?
                 ((ULONG)payload[19] << 8) | payload[20] : 0;
-            TraceDiag("hotspot: EAPOL TX queued if %u bytes %u exempt %u "
+            TraceVerbose(TRACE_DRIVER, "hotspot: EAPOL TX queued if %u bytes %u exempt %u "
                 "bdc 0x%02X keyinfo 0x%04X dst %02X:%02X:%02X:%02X:%02X:%02X\n",
                 ifIndex, ethLength, (ULONG)metadata->u.txMetaData.ExemptionAction,
                 (ULONG)bdc->Flags, keyInfo, payload[0], payload[1], payload[2],
                 payload[3], payload[4], payload[5]);
         }
 
-        TraceInfo(TRACE_NETADAPTER,
+        TraceVerbose(TRACE_NETADAPTER,
                   "tx EAPOL #%d (frame %d, %u bytes)\n",
                   InterlockedIncrement(&Ctx->TalTxEapol), count, ethLength);
     } else {
@@ -1320,7 +1323,7 @@ Ap6256TalTxFlushChain(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                     Chain->Frames[i].WireLength - headroom, status);
             if ((bdc[0] & 3u) != AP6256_FIPS_BCDC_TX_EXEMPT && Chain->Frames[i].WireLength >= headroom + 14u &&
                 ether[12] == 0x88 && ether[13] == 0x8e) {
-                TraceDiag("EAPOL TX transfer if %u bytes %u bdc 0x%02X "
+                TraceVerbose(TRACE_DRIVER, "EAPOL TX transfer if %u bytes %u bdc 0x%02X "
                     "-> 0x%08X submitted %u\n", (ULONG)(bdc[2] & 0x0fu),
                     Chain->Frames[i].WireLength - headroom, (ULONG)bdc[0],
                     status, (ULONG)NT_SUCCESS(status));
@@ -1797,10 +1800,13 @@ static VOID
 Ap6256TalTxWorker(_In_ PVOID Context)
 {
     PAP6256_DEVICE_CONTEXT ctx = (PAP6256_DEVICE_CONTEXT)Context;
+    LONG keyFence;
 
     InterlockedExchange(&ctx->TxPassRerun, 0);
 
+    keyFence = InterlockedCompareExchange(&ctx->TxKeyFenceRequested, 0, 0);
     Ap6256TalTxCountedPass(ctx);
+    InterlockedExchange(&ctx->TxKeyFenceCompleted, keyFence);
 
     InterlockedExchange(&ctx->TxPassScheduled, 0);
     if (InterlockedCompareExchange(&ctx->TxPassRerun, 0, 0) != 0 &&
@@ -1816,6 +1822,29 @@ Ap6256TalTxSchedule(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     InterlockedExchange(&Ctx->TxPassRerun, 1);
     if (InterlockedCompareExchange(&Ctx->TxPassScheduled, 1, 0) == 0) {
         Ap6256WorkItemEnqueue(&Ctx->TxWorker);
+    }
+}
+
+_Use_decl_annotations_
+NTSTATUS Ap6256NetTxSynchronize(PAP6256_DEVICE_CONTEXT Ctx, ULONGLONG Deadline)
+{
+    LARGE_INTEGER interval;
+    ULONG ticket;
+    if (!Ctx->TalStarted || !Ctx->DatapathRunning || Ctx->HostTxQuiesced != 0)
+        return STATUS_DEVICE_NOT_READY;
+    ticket = (ULONG)InterlockedIncrement(&Ctx->TxKeyFenceRequested);
+    interval.QuadPart = -10000ll;
+    Ap6256TalTxSchedule(Ctx);
+    for (;;) {
+        ULONG completed = (ULONG)InterlockedCompareExchange(&Ctx->TxKeyFenceCompleted, 0, 0);
+        if (!Ctx->TalStarted || !Ctx->DatapathRunning || Ctx->HostTxQuiesced != 0)
+            return STATUS_DEVICE_NOT_READY;
+        if ((LONG)(completed - ticket) >= 0) return STATUS_SUCCESS;
+        if (KeQueryInterruptTime() >= Deadline) {
+            TraceWarn(TRACE_NETADAPTER, "key update blocked by the WDI transmit queue\n");
+            return STATUS_IO_TIMEOUT;
+        }
+        (VOID)KeDelayExecutionThread(KernelMode, FALSE, &interval);
     }
 }
 

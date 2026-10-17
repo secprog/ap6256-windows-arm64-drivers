@@ -123,6 +123,7 @@ NTSTATUS Ap6256EvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Devic
     Ap6256LockInit(&ctx->TdlsLock);
     Ap6256LockInit(&ctx->PnoLock);
     Ap6256LockInit(&ctx->WlfcLifetimeLock);
+    Ap6256LockInit(&ctx->NativeKeyLock);
     KeInitializeSpinLock(&ctx->Sdio.TxStateLock);
     KeInitializeSpinLock(&ctx->HostFipsLock);
     KeInitializeMutex(&ctx->HostCipherControlLock, 0);

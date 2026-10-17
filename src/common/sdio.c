@@ -657,6 +657,21 @@ VOID Ap6256SdioTraceBusStats(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     LONG isrNow, isrDelta;
 
     if (Ctx->Sdio.StatPrintedAt == 0) {
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatHdrReads);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatHdrReadUs);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatBodyReads);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatBodyReadBytes);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatBodyReadUs);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatWrites);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatWriteBytes);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatWriteUs);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatOtherCmd53);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatOtherUs);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatRxFrames);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatTxFrames);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatPasses);
+        (VOID)Ap6256StatTake(&Ctx->Sdio.StatEmptyPolls);
+        Ctx->Sdio.StatIsrSnapshot = InterlockedCompareExchange(&Ctx->Sdio.IsrCount, 0, 0);
         Ctx->Sdio.StatPrintedAt = now;
         return;
     }

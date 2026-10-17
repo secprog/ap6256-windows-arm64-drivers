@@ -77,6 +77,8 @@ volatile LONG TxPassRerun;
 AP6256_TIMER RxOpenTimer;
 
 AP6256_LOCK TxPassLock;
+volatile LONG TxKeyFenceRequested;
+volatile LONG TxKeyFenceCompleted;
 
 LONG TxPaused;
 

@@ -338,6 +338,7 @@ typedef struct _AP6256_WIFI {
     TLV_CONTEXT TlvContext;
 
     AP6256_WDI_TASK ScanTask;
+    UINT16 ScanTaskSyncId;
     AP6256_WDI_TASK ConnectTask;
     AP6256_WDI_TASK DisconnectTask;
 

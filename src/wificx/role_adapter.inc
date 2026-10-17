@@ -255,6 +255,14 @@ VOID Ap6256NetRxIndicate(PAP6256_DEVICE_CONTEXT Ctx, PUCHAR Frame, ULONG Length,
     ExReleaseRundownProtection(&role->Rundown);
 }
 
+_Use_decl_annotations_
+NTSTATUS Ap6256NetTxSynchronize(PAP6256_DEVICE_CONTEXT Ctx, ULONGLONG Deadline)
+{
+    UNREFERENCED_PARAMETER(Ctx);
+    UNREFERENCED_PARAMETER(Deadline);
+    return STATUS_SUCCESS;
+}
+
 VOID Ap6256NetTxKick(PAP6256_DEVICE_CONTEXT Ctx)
 {
     PAP6256_WIFI wifi = Ap6256WifiFromDevice(Ctx);

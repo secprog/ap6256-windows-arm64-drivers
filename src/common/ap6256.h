@@ -385,6 +385,16 @@ typedef struct _AP6256_CONNECTION_QUALITY {
     UINT32 Hints[AP6256_GROUP_PORT + 1];
 } AP6256_CONNECTION_QUALITY;
 
+#define AP6256_NATIVE_KEY_SLOTS 32u
+
+typedef struct _AP6256_NATIVE_KEY_REF {
+    ULONG KeyId;
+    UCHAR PeerAddress[6];
+    BOOLEAN Pairwise;
+    BOOLEAN Management;
+    BOOLEAN Valid;
+} AP6256_NATIVE_KEY_REF;
+
 typedef struct _AP6256_DEVICE_CONTEXT {
     AP6256_GO_STATE Go;
     AP6256_CONNECTION_QUALITY ConnectionQuality;
@@ -534,6 +544,8 @@ typedef struct _AP6256_DEVICE_CONTEXT {
     BOOLEAN P2pInterfaceValid;
 
     INT32   RoamRssiTriggerDbm;
+    volatile LONG BeaconLossTimeoutSeconds;
+    volatile LONG NloScanMode;
 
     UINT32  PacketFilterMax;
 
@@ -554,6 +566,14 @@ typedef struct _AP6256_DEVICE_CONTEXT {
     BOOLEAN         ConnectionRequiresSupplicant;
     BOOLEAN         FirmwareLinkUp;
     BOOLEAN         SupplicantComplete;
+    AP6256_LOCK     NativeKeyLock;
+    AP6256_NATIVE_KEY_REF NativeKeys[AP6256_NATIVE_KEY_SLOTS];
+    BOOLEAN         NativeDeparturePending;
+    BOOLEAN         NativeDepartureCommitted;
+    UINT32          NativeDepartureToken;
+    UINT32          NativeDepartureNext;
+    UINT32          NativeDepartureReason;
+    UCHAR           NativeDeparturePeer[6];
 
     PVOID           NetAdapter;
 

@@ -713,6 +713,7 @@ VOID Ap6256NetHardwareStop(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (!OnCommandWorker) {
         Ap6256WorkItemFlush(&wifi->CommandWorkItem);
     }
+    (VOID)Ap6256WifiLeaveForPowerDown(Ctx);
 
     Ap6256CancelActionFrame(wifi, CompletionStatus);
     (VOID)Ap6256FtmCancel(wifi,FALSE,0,0,CompletionStatus);

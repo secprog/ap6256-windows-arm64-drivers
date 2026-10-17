@@ -322,6 +322,7 @@ VOID Ap6256NetHardwareStop(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (!OnCommandWorker && wifi->CommandWorkItem != NULL) {
         WdfWorkItemFlush(wifi->CommandWorkItem);
     }
+    (VOID)Ap6256WifiLeaveForPowerDown(Ctx);
     Ap6256CxFlushTxWorkers(wifi);
     Ap6256ModelDeleteStationPeer(wifi);
     Ap6256CxQuiesceRole(wifi, AP6256_GROUP_PORT);

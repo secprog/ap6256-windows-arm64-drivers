@@ -84,13 +84,17 @@ _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256NetNloDiscovery(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ PAP6256_BSS Bss);
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetScanComplete(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-                            _In_ NTSTATUS CompletionStatus);
+                            _In_ NTSTATUS CompletionStatus, _In_ UINT16 SyncId);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetLinkChange(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ BOOLEAN LinkUp);
 
 _IRQL_requires_max_(DISPATCH_LEVEL)
 VOID Ap6256NetTxKick(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256NetTxSynchronize(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_ ULONGLONG Deadline);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetSetMacAddress(_In_ PAP6256_DEVICE_CONTEXT Ctx);
@@ -110,6 +114,12 @@ _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetStationFirmwareEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ BOOLEAN Up,
     _In_ BOOLEAN TerminalFailure, _In_reads_opt_(6) const UCHAR* Peer,
     _In_ UINT32 FirmwareGeneration);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID Ap6256NetStationAssocFailure(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_reads_(6) const UCHAR* Peer, _In_ UINT32 FirmwareGeneration,
+    _In_ BOOLEAN ReAssociation, _In_reads_bytes_(Length) const UCHAR* Response,
+    _In_ ULONG Length);
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetStationHostCipherEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx, _In_ BOOLEAN Up,
     _In_ BOOLEAN TerminalFailure, _In_reads_(6) const UCHAR* Peer,

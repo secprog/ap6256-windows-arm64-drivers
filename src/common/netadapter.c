@@ -67,7 +67,7 @@ VOID Ap6256NetScanResult(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                                                             _In_ PAP6256_BSS Bss);
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetScanComplete(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-                                                              _In_ NTSTATUS CompletionStatus);
+                                                              _In_ NTSTATUS CompletionStatus, _In_ UINT16 SyncId);
 _IRQL_requires_max_(DISPATCH_LEVEL)
 static VOID Ap6256StoreConnectRestrictions(
     _In_ PAP6256_WIFI Wifi, _In_opt_ const WDI_ADDRESS_LIST_CONTAINER* Allowed,
@@ -1307,6 +1307,11 @@ VOID Ap6256NetScanResult(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         TraceInfo(TRACE_NETADAPTER, "scan BSS dropped: no scan task active\n");
         return;
     }
+    if (Bss->SyncId != (UINT16)Ctx->ScanSyncId ||
+        (wifi->ScanTask.Active && Bss->SyncId != wifi->ScanTaskSyncId)) {
+        KeReleaseSpinLock(&wifi->CommandLock, oldIrql);
+        return;
+    }
     taskHeader = wifi->ScanTask.Active ? wifi->ScanTask.Header : wifi->P2pDiscoverTask.Header;
     taskRequestId =
         wifi->ScanTask.Active ? wifi->ScanTask.RequestId : wifi->P2pDiscoverTask.RequestId;
@@ -1391,36 +1396,39 @@ VOID Ap6256NetScanResult(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256NetScanComplete(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-                                                              _In_ NTSTATUS CompletionStatus)
+                                                              _In_ NTSTATUS CompletionStatus, _In_ UINT16 SyncId)
 {
     PAP6256_WIFI wifi = Ap6256WifiFromDevice(Ctx);
-    WDI_MESSAGE_HEADER header;
-    PVOID requestId;
+    WDI_MESSAGE_HEADER header = {0};
+    PVOID requestId = NULL;
+    KIRQL irql;
+    BOOLEAN claimed = FALSE;
+    LONG indicated = 0, dropped = 0;
 
-    if (wifi != NULL && wifi->P2pDiscoverTask.Active) {
+    if (wifi == NULL || !SyncId) return;
+    KeAcquireSpinLock(& wifi->CommandLock, &irql);
+    if (SyncId == (UINT16)Ctx->ScanSyncId) {
+        if (wifi->P2pDiscoverTask.Active) {
 
-        if (InterlockedCompareExchange(&wifi->Ctx->P2p.DiscoverScanPending, 0, 0) != 0) {
-            TraceDiag("P2P scan complete sync %u status 0x%08X: %ld indicated, %ld dropped\n",
-                      (UINT16)Ctx->ScanSyncId, CompletionStatus,
-                      InterlockedCompareExchange(&wifi->ScanIndicated, 0, 0),
-                      InterlockedCompareExchange(&wifi->ScanDropped, 0, 0));
-            wifi->Ctx->P2p.DiscoverStatus = CompletionStatus;
-            InterlockedExchange(&wifi->Ctx->P2p.DiscoverScanPending, 0);
+        if (InterlockedCompareExchange(&Ctx->P2p.DiscoverScanPending, 0, 0) != 0) {
+                Ctx->P2p.DiscoverStatus = CompletionStatus;
+                InterlockedExchange(&Ctx->P2p.DiscoverScanPending, 0);
+            }
+        } else if (wifi->ScanTask.Active && wifi->ScanTaskSyncId == SyncId) {
+            header = wifi->ScanTask.Header;
+            requestId = wifi->ScanTask.RequestId;
+            wifi->ScanTask.Active = FALSE;
+            indicated = InterlockedCompareExchange(&wifi->ScanIndicated, 0, 0);
+            dropped = InterlockedCompareExchange(&wifi->ScanDropped, 0, 0);
+            claimed = TRUE;
         }
-        return;
     }
-    if (wifi != NULL) {
-
-        AP6256_TIMER_STOP(wifi->ScanTimer, FALSE);
-    }
-    if (wifi != NULL && Ap6256ClaimTask(wifi, &wifi->ScanTask, &header, &requestId)) {
-
-        (VOID) Ap6256SendIndicationRq(wifi, WDI_INDICATION_SCAN_COMPLETE, &header,
-                                      header.TransactionId, requestId, CompletionStatus, NULL, 0);
-
-        TraceInfo(TRACE_NETADAPTER, "WDI scan complete 0x%08X: %d indicated, %d dropped\n",
-                  CompletionStatus, InterlockedCompareExchange(&wifi->ScanIndicated, 0, 0),
-                  InterlockedCompareExchange(&wifi->ScanDropped, 0, 0));
+    KeReleaseSpinLock(&wifi->CommandLock, irql);
+    if (claimed) {
+        (VOID)Ap6256SendIndicationRq(wifi, WDI_INDICATION_SCAN_COMPLETE, &header,
+            header.TransactionId, requestId, CompletionStatus, NULL, 0);
+        TraceVerbose(TRACE_NETADAPTER, "WDI scan complete 0x%08X: %d indicated, %d dropped\n",
+            CompletionStatus, indicated, dropped);
     }
 }
 
@@ -2356,6 +2364,35 @@ static NTSTATUS Ap6256CaptureScanParameters(_In_ PAP6256_WIFI Wifi,
     return Params->ChannelCount != 0 ? STATUS_SUCCESS : STATUS_NETWORK_UNREACHABLE;
 }
 
+static NTSTATUS Ap6256BeginScanTask(PAP6256_WIFI Wifi,
+    const WDI_MESSAGE_HEADER* Header, PVOID RequestId, UINT16* SyncId)
+{
+    KIRQL irql;
+    LONG reserved;
+    NTSTATUS status = STATUS_DEVICE_BUSY;
+
+    *SyncId = 0;
+    KeAcquireSpinLock(&Wifi->CommandLock, &irql);
+    if (!Wifi->ScanTask.Active && !Wifi->P2pDiscoverTask.Active) {
+        reserved = InterlockedIncrement(&Wifi->Ctx->ScanSyncId);
+        if ((UINT16)reserved == 0)
+            reserved = InterlockedIncrement(&Wifi->Ctx->ScanSyncId);
+        *SyncId = (UINT16)reserved;
+        Wifi->ScanTaskSyncId = *SyncId;
+        Wifi->ScanTask.Header = *Header;
+        Wifi->ScanTask.RequestId = RequestId;
+        Wifi->ScanTask.DeadlineMs = 0;
+        Wifi->ScanTask.Active = TRUE;
+        InterlockedExchange(&Wifi->ScanIndicated, 0);
+        InterlockedExchange(&Wifi->ScanDropped, 0);
+        if (Header->PortId == AP6256_STATION_PORT)
+            Wifi->IndicationHeader = *Header;
+        status = STATUS_SUCCESS;
+    }
+    KeReleaseSpinLock(&Wifi->CommandLock, irql);
+    return status;
+}
+
 _IRQL_requires_max_(PASSIVE_LEVEL)
 static VOID
 Ap6256HandleScanRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
@@ -2366,6 +2403,7 @@ Ap6256HandleScanRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
     AP6256_SCAN_PARAMS scanParams = {0};
     NTSTATUS status;
     ULONG timeoutMs;
+    UINT16 syncId = 0;
 
     RtlZeroMemory(&parameters, sizeof(parameters));
     status = Ap6256NdisToNtStatus(ParseWdiTaskScan(TlvLength, Tlv, &Wifi->TlvContext, &parameters));
@@ -2381,11 +2419,7 @@ Ap6256HandleScanRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
         (!Wifi->Ctx->DatapathRunning || Wifi->Ctx->FirmwareState != Ap6256FwRunning)) {
         status = STATUS_DEVICE_NOT_READY;
     } else if (NT_SUCCESS(status)) {
-        status = Ap6256BeginTask(Wifi, &Wifi->ScanTask, Header, Ap6256RequestGetId(Request));
-        if (NT_SUCCESS(status)) {
-            InterlockedExchange(&Wifi->ScanIndicated, 0);
-            InterlockedExchange(&Wifi->ScanDropped, 0);
-        }
+        status = Ap6256BeginScanTask(Wifi, Header, Ap6256RequestGetId(Request), &syncId);
     }
     CleanupParsedWdiTaskScan(&parameters);
     if (!NT_SUCCESS(status)) {
@@ -2401,11 +2435,9 @@ Ap6256HandleScanRequest(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Request,
     AP6256_TIMER_START(Wifi->ScanTimer, timeoutMs);
     status = Ap6256QuiesceP2pListen(Wifi);
     if (NT_SUCCESS(status))
-        status = Ap6256WifiScanStart(Wifi->Ctx, &scanParams);
-    if (!NT_SUCCESS(status)) {
-        AP6256_TIMER_STOP(Wifi->ScanTimer, TRUE);
-        Ap6256FailStartedTask(Wifi, &Wifi->ScanTask, WDI_INDICATION_SCAN_COMPLETE, status);
-    }
+        status = Ap6256WifiScanStart(Wifi->Ctx, &scanParams, syncId);
+    if (!NT_SUCCESS(status))
+        Ap6256NetScanComplete(Wifi->Ctx, status, syncId);
 }
 
 BOOLEAN Ap6256AlgorithmPresent(_In_ const WDI_AUTH_ALGORITHM_LIST_CONTAINER* List,
@@ -3341,6 +3373,7 @@ Ap6256HandleAdapterConfiguration(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Req
 {
     WDI_SET_FIRMWARE_CONFIGURATION_PARAMETERS parameters;
     NTSTATUS status;
+    PCSTR stage = "parse";
     LONG disallowedBands = 0;
     ULONG index;
 
@@ -3349,16 +3382,39 @@ Ap6256HandleAdapterConfiguration(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Req
         ParseWdiSetAdapterConfiguration(TlvLength, Tlv, &Wifi->TlvContext, &parameters));
     if (!NT_SUCCESS(status))
         goto Complete;
+    TraceVerbose(TRACE_DRIVER, "adapter configuration: bytes %u MAC %u bands %u bars %u PLDR %u unreachable %u/%u GO reset %u/%u NLO mode %u/%u\n",
+        TlvLength, parameters.Optional.MacAddress_IsPresent,
+        parameters.Optional.DisallowedBandList_IsPresent ? parameters.DisallowedBandList.ElementCount : 0u,
+        parameters.LinkQualityBarMap.ElementCount, (UINT32)parameters.PLDRSupport,
+        parameters.Optional.UnreachableDetectionThreshold_IsPresent,
+        parameters.Optional.UnreachableDetectionThreshold_IsPresent ? parameters.UnreachableDetectionThreshold : 0u,
+        parameters.Optional.GroupOwnerResetPolicy_IsPresent,
+        parameters.Optional.GroupOwnerResetPolicy_IsPresent ? (UINT32)parameters.GroupOwnerResetPolicy : 0u,
+        parameters.Optional.AdapterNloScanMode_IsPresent,
+        parameters.Optional.AdapterNloScanMode_IsPresent ? (UINT32)parameters.AdapterNloScanMode : 0u);
+    stage = "port state";
     if (Wifi->PortCreated) {
         status = STATUS_INVALID_DEVICE_STATE;
         goto Complete;
     }
-    if (parameters.Optional.UnreachableDetectionThreshold_IsPresent ||
-        parameters.Optional.GroupOwnerResetPolicy_IsPresent ||
-        parameters.Optional.AdapterNloScanMode_IsPresent) {
+    if (parameters.Optional.UnreachableDetectionThreshold_IsPresent) {
+        stage = "unreachable threshold";
+        status = Ap6256WifiValidateUnreachableThreshold(parameters.UnreachableDetectionThreshold);
+        if (!NT_SUCCESS(status)) goto Complete;
+    }
+    if (parameters.Optional.GroupOwnerResetPolicy_IsPresent) {
+        stage = "GO internal reset policy";
         status = STATUS_NOT_SUPPORTED;
         goto Complete;
     }
+    if (parameters.Optional.AdapterNloScanMode_IsPresent) {
+        stage = "NLO scan mode";
+        if (parameters.AdapterNloScanMode != WDI_SCAN_TYPE_AUTO) {
+            status = STATUS_NOT_SUPPORTED;
+            goto Complete;
+        }
+    }
+    stage = "band validation";
     if (parameters.Optional.DisallowedBandList_IsPresent) {
         if (parameters.DisallowedBandList.ElementCount != 0 &&
             parameters.DisallowedBandList.pElements == NULL) {
@@ -3377,21 +3433,36 @@ Ap6256HandleAdapterConfiguration(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Req
         }
     }
     if (parameters.Optional.MacAddress_IsPresent) {
+        stage = "MAC validation";
         if (!Ap6256MacIsValidUnicast(parameters.MacAddress.Address)) {
             status = STATUS_INVALID_PARAMETER;
             goto Complete;
         }
         if (InterlockedCompareExchange(&Wifi->HardwareAvailable, 0, 0) != 0) {
+            stage = "MAC programming";
             status = Ap6256WifiSetMacAddress(Wifi->Ctx, parameters.MacAddress.Address);
             if (!NT_SUCCESS(status))
                 goto Complete;
         }
     }
 
+    stage = "band programming";
     Ap6256LockAcquire(&Wifi->ConnectLock);
     status = Ap6256MboSetBands(Wifi, disallowedBands, TRUE);
     Ap6256LockRelease(&Wifi->ConnectLock);
     if (!NT_SUCCESS(status)) goto Complete;
+    if (parameters.Optional.UnreachableDetectionThreshold_IsPresent) {
+        stage = "unreachable threshold programming";
+        if (InterlockedCompareExchange(&Wifi->HardwareAvailable, 0, 0) != 0) {
+            status = Ap6256WifiApplyUnreachableThreshold(Wifi->Ctx,
+                parameters.UnreachableDetectionThreshold);
+            if (!NT_SUCCESS(status)) goto Complete;
+        }
+        InterlockedExchange(&Wifi->Ctx->BeaconLossTimeoutSeconds,
+            (LONG)(parameters.UnreachableDetectionThreshold / 1000u));
+    }
+    if (parameters.Optional.AdapterNloScanMode_IsPresent)
+        InterlockedExchange(&Wifi->Ctx->NloScanMode, AP6256_NLO_SCAN_AUTO);
     InterlockedExchange(&Wifi->DisallowedBandMask, disallowedBands);
     if (parameters.Optional.MacAddress_IsPresent) {
         RtlCopyMemory(Wifi->Ctx->ConfiguredMacAddress, parameters.MacAddress.Address,
@@ -3403,6 +3474,9 @@ Ap6256HandleAdapterConfiguration(_In_ PAP6256_WIFI Wifi, _In_ AP6256_REQUEST Req
     }
 
 Complete:
+    if (!NT_SUCCESS(status))
+        TraceWarn(TRACE_NETADAPTER, "adapter configuration failed at %s: 0x%08X (%u TLV bytes)\n",
+            stage, status, TlvLength);
     CleanupParsedWdiSetAdapterConfiguration(&parameters);
     Ap6256CompleteRequest(Wifi, Request, status);
 }
@@ -4097,6 +4171,59 @@ static VOID Ap6256HandleP2pSendResponseActionFrame(
     Ap6256CompleteRequest(Wifi, Request, status);
 }
 
+_Success_(return != FALSE)
+static BOOLEAN Ap6256ReadTlvHeader(_In_reads_bytes_(TlvLength) const UCHAR* Tlv, _In_ ULONG TlvLength, _In_ ULONG Offset, _Out_ UINT16* Type, _Out_ UINT16* Length)
+{
+    UCHAR header[4];
+    if (Tlv == NULL || TlvLength < sizeof(header) || Offset > TlvLength - sizeof(header))
+        return FALSE;
+    RtlCopyMemory(header, Tlv + Offset, sizeof(header));
+    *Type = (UINT16)(header[0] | ((UINT16)header[1] << 8));
+    *Length = (UINT16)(header[2] | ((UINT16)header[3] << 8));
+    return TRUE;
+}
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+static BOOLEAN Ap6256EmptyGroupServiceList(_In_reads_bytes_(TlvLength) const UCHAR* Tlv,
+    _In_ ULONG TlvLength)
+{
+    ULONG offset = 0;
+    BOOLEAN found = FALSE;
+    if (Tlv == NULL) return FALSE;
+    while (offset < TlvLength) {
+        UINT16 type, length;
+        if (!Ap6256ReadTlvHeader(Tlv, TlvLength, offset, &type, &length)) return FALSE;
+        offset += 4;
+        if (length > TlvLength - offset) return FALSE;
+        if (type == 0x00efu) {
+            ULONG child = 0;
+            BOOLEAN update = FALSE, emptyEntries = FALSE;
+            if (found) return FALSE;
+            found = TRUE;
+            while (child < length) {
+                UINT16 childType, childLength;
+                ULONG position;
+                if ((ULONG)length - child < 4 || offset > TlvLength || child > TlvLength - offset)
+                    return FALSE;
+                position = offset + child;
+                if (!Ap6256ReadTlvHeader(Tlv, TlvLength, position, &childType, &childLength))
+                    return FALSE;
+                child += 4;
+                if (childLength > (ULONG)length - child) return FALSE;
+                if (childType == 0x0115u && childLength == 2 && !update) {
+                    update = TRUE;
+                } else if (childType == 0x00f0u && childLength == 0 && !emptyEntries) {
+                    emptyEntries = TRUE;
+                } else return FALSE;
+                child += childLength;
+            }
+            if (!update) return FALSE;
+        }
+        offset += length;
+    }
+    return found;
+}
+
 _IRQL_requires_max_(PASSIVE_LEVEL)
 static VOID Ap6256HandleSetAdvertisementInformation(
     _In_ PAP6256_WIFI Wifi, _In_ PWDI_MESSAGE_HEADER Header, _In_ AP6256_REQUEST Request,
@@ -4123,9 +4250,11 @@ static VOID Ap6256HandleSetAdvertisementInformation(
         status = STATUS_INVALID_DEVICE_STATE;
     }
 
-    if (NT_SUCCESS(status) && parameters.Optional.AdvertisedServices_IsPresent && group)
+    if (NT_SUCCESS(status) && parameters.Optional.AdvertisedServices_IsPresent && group &&
+        (parameters.AdvertisedServices.ServiceEntry.ElementCount != 0 ||
+         !Ap6256EmptyGroupServiceList(Tlv, TlvLength)))
         status = STATUS_NOT_SUPPORTED;
-    if (NT_SUCCESS(status) && parameters.Optional.AdvertisedServices_IsPresent)
+    if (NT_SUCCESS(status) && parameters.Optional.AdvertisedServices_IsPresent && !group)
         status=Ap6256ServiceValidateAdvertisements(Wifi,&parameters.AdvertisedServices);
 
     if (NT_SUCCESS(status) && parameters.Optional.AdditionalIEs_IsPresent) {
@@ -4213,7 +4342,7 @@ static VOID Ap6256HandleSetAdvertisementInformation(
         status = Ap6256P2pBuildIesFor(Wifi->Ctx, p2p, ifIndex);
     }
 
-    if (NT_SUCCESS(status) && parameters.Optional.AdvertisedServices_IsPresent)
+    if (NT_SUCCESS(status) && parameters.Optional.AdvertisedServices_IsPresent && !group)
         status = Ap6256ServiceAdvertise(Wifi, &parameters.AdvertisedServices);
     Ap6256LockRelease(&Wifi->P2pLock);
     CleanupParsedWdiSetAdvertisementInformation(&parameters);

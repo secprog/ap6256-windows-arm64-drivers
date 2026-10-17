@@ -9,6 +9,9 @@
 #include "ap6256.h"
 #include "wowl.h"
 _IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256NativeDeparture(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+    _In_reads_opt_(6) const UCHAR* Bssid, _In_ UINT32 Reason, _Out_ BOOLEAN* Handled);
+_IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiGetPowerSaveStats(PAP6256_DEVICE_CONTEXT Ctx, UINT32 IfIndex,
                                     PAP6256_POWER_SAVE_STATS Stats);
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -177,7 +180,7 @@ NTSTATUS Ap6256WifiResetMib(_In_ PAP6256_DEVICE_CONTEXT Ctx);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiScanStart(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-                             _In_ const AP6256_SCAN_PARAMS* Params);
+                             _In_ const AP6256_SCAN_PARAMS* Params, _In_ UINT16 SyncId);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiScanAbort(_In_ PAP6256_DEVICE_CONTEXT Ctx);
@@ -200,7 +203,9 @@ _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiDisconnect(_In_ PAP6256_DEVICE_CONTEXT Ctx);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
-VOID Ap6256WifiClearSecurityState(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+NTSTATUS Ap6256WifiClearSecurityState(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID Ap6256WifiForgetNativeKeys(_In_ PAP6256_DEVICE_CONTEXT Ctx);
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256WifiResetFirmwareCounters(_In_ PAP6256_DEVICE_CONTEXT Ctx);
 
@@ -283,6 +288,7 @@ NTSTATUS Ap6256WifiSetDefaultKeyId(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 
 #define AP6256_NLO_NETWORK_MAX      16u
 #define AP6256_NLO_CHANNEL_HINTS     4u
+#define AP6256_NLO_SCAN_AUTO         3u
 
 typedef struct _AP6256_NLO_NETWORK {
     UCHAR  Ssid[32];
@@ -347,6 +353,9 @@ NTSTATUS Ap6256WifiRadioUpDown(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                                _In_ BOOLEAN Up);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256WifiLeaveForPowerDown(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256WifiGetChanspec(_In_ PAP6256_DEVICE_CONTEXT Ctx,
                                _Out_ PUINT32 Chanspec);
 
@@ -365,6 +374,16 @@ NTSTATUS Ap6256WifiArmRssiEvent(_In_ PAP6256_DEVICE_CONTEXT Ctx,
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256WifiArmRoamTriggers(_In_ PAP6256_DEVICE_CONTEXT Ctx);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256WifiValidateUnreachableThreshold(_In_ UINT32 ThresholdMs);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256WifiApplyUnreachableThreshold(_In_ PAP6256_DEVICE_CONTEXT Ctx,
+                                            _In_ UINT32 ThresholdMs);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSTATUS Ap6256WifiRestoreUnreachableThreshold(_In_ PAP6256_DEVICE_CONTEXT Ctx);
 
 #define AP6256_P2P_IF_CLIENT      0u
 #define AP6256_P2P_IF_GO          1u

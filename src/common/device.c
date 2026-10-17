@@ -436,6 +436,8 @@ NTSTATUS Ap6256BringUpChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     Ap6256TdlsInitialize(Ctx, NT_SUCCESS(capStatus) ? caps : NULL, sizeof(caps));
     Ap6256PnoEnableResultEvents(Ctx);
     Ap6256SaeFirmwarePrepare(Ctx);
+    status = Ap6256WifiRestoreUnreachableThreshold(Ctx);
+    if (!NT_SUCCESS(status)) goto fail;
     status = Ap6256NetHardwareStart(Ctx);
     if (!NT_SUCCESS(status)) goto fail;
     TraceInfo(TRACE_DEVICE, "bring-up complete\n");
@@ -457,7 +459,6 @@ VOID Ap6256TearDownChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     Ctx->PowerThread = KeGetCurrentThread();
 
     Ap6256HostCipherFirmwareRetire(Ctx);
-    Ctx->FirmwareHostCipherPatchVerified = FALSE;
     if (Ctx->Sdio.Sleeping && NT_SUCCESS(Ap6256SdioSetSleep(Ctx, FALSE)))
         Ap6256DatapathResume(Ctx);
     Ap6256PnoResultsQuiesce(Ctx);
@@ -466,6 +467,7 @@ VOID Ap6256TearDownChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     if (Ctx->FirmwareState == Ap6256FwRunning && Ctx->DatapathRunning) {
         (VOID)Ap6256WifiRadioUpDown(Ctx, FALSE);
     }
+    Ctx->FirmwareHostCipherPatchVerified = FALSE;
 
     if (Ctx->Sdio.BusInterface != NULL) {
         if (Ctx->Sdio.ClockOn && Ctx->Chip.SdiodCore != NULL) {
@@ -525,6 +527,7 @@ VOID Ap6256TearDownChip(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     Ctx->Sdio.ClockOn = FALSE;
     Ctx->Sdio.BackplaneWindow = MAXULONG;
     Ctx->FirmwareState = Ap6256FwNotLoaded;
+    Ap6256WifiForgetNativeKeys(Ctx);
     Ctx->D11IoType = 0;
     Ctx->Go.FirmwareReady = FALSE;
     Ctx->Go.Started = FALSE;

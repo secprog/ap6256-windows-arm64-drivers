@@ -14,12 +14,17 @@
 
 #if AP6256_HOST_CIPHER_CANDIDATE
 #include "host_cipher_patch.h"
+#include "native_departure_patch.h"
 
 typedef struct _AP6256_HC_PATCH {
     ULONG Offset, Length, DataOffset;
 } AP6256_HC_PATCH;
 static const AP6256_HC_PATCH Ap6256HcPatches[] = {
     AP6256_HC_PATCH_ENTRIES
+};
+
+static const AP6256_HC_PATCH Ap6256NdPatches[] = {
+    AP6256_ND_PATCH_ENTRIES
 };
 
 static NTSTATUS Ap6256HcHash(_In_reads_bytes_(Length) const UCHAR* Image,
@@ -76,8 +81,25 @@ NTSTATUS Ap6256PrepareHostCiphers(PAP6256_DEVICE_CONTEXT Ctx,
     }
     status = BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, copy, *Length,
         digest, sizeof(digest));
-    if (NT_SUCCESS(status) && !RtlEqualMemory(digest, Ap6256HcOutputSha256,
-        sizeof(digest))) status = STATUS_DATA_ERROR;
+    if (NT_SUCCESS(status) && (!RtlEqualMemory(digest, Ap6256HcOutputSha256,
+        sizeof(digest)) || !RtlEqualMemory(digest, Ap6256NdInputSha256,
+        sizeof(digest)))) status = STATUS_DATA_ERROR;
+    if (!NT_SUCCESS(status)) {
+        ExFreePoolWithTag(copy, AP6256_POOL_TAG);
+        return status;
+    }
+    for (i = 0; i < RTL_NUMBER_OF(Ap6256NdPatches); ++i) {
+        const AP6256_HC_PATCH* patch = &Ap6256NdPatches[i];
+        if (patch->Offset > *Length || patch->Length > *Length - patch->Offset ||
+            patch->DataOffset > sizeof(Ap6256NdPatchBytes) ||
+            patch->Length > sizeof(Ap6256NdPatchBytes) - patch->DataOffset) {
+            ExFreePoolWithTag(copy, AP6256_POOL_TAG);
+            return STATUS_REVISION_MISMATCH;
+        }
+        RtlCopyMemory(copy + patch->Offset,
+            Ap6256NdPatchBytes + patch->DataOffset, patch->Length);
+    }
+    status = Ap6256HcHash(copy, *Length, Ap6256NdOutputSha256);
     if (!NT_SUCCESS(status)) {
         ExFreePoolWithTag(copy, AP6256_POOL_TAG);
         return status;
@@ -102,10 +124,11 @@ NTSTATUS Ap6256VerifyHostCiphers(PAP6256_DEVICE_CONTEXT Ctx,
     NTSTATUS status;
     if (Ctx == NULL || Image == NULL || !Ap6256HcExactChip(Ctx, Length))
         return STATUS_REVISION_MISMATCH;
-    status = Ap6256HcHash(Image, Length, Ap6256HcOutputSha256);
+    status = Ap6256HcHash(Image, Length, Ap6256NdOutputSha256);
     if (!NT_SUCCESS(status)) return status;
-    for (pass = 0; pass < RTL_NUMBER_OF(Ap6256HcPatches); ++pass) {
-        const AP6256_HC_PATCH* patch = &Ap6256HcPatches[pass];
+    for (pass = 0; pass < RTL_NUMBER_OF(Ap6256HcPatches) + RTL_NUMBER_OF(Ap6256NdPatches); ++pass) {
+        const AP6256_HC_PATCH* patch = pass < RTL_NUMBER_OF(Ap6256HcPatches) ?
+            &Ap6256HcPatches[pass] : &Ap6256NdPatches[pass - RTL_NUMBER_OF(Ap6256HcPatches)];
         ULONG start = patch->Offset & ~3u;
         ULONG end = (patch->Offset + patch->Length + 3u) & ~3u;
         ULONG offset;
