@@ -13,6 +13,7 @@ import re
 import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 PRE = r'''
+#define Ap6256TraceInformationEnabled(Category) TRUE
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <assert.h>

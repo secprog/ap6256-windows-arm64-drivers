@@ -343,6 +343,23 @@ int main() {
     TraceError(TRACE_DRIVER,"after cleanup");Ap6256TraceWatchdog(7,1,0,0,0,0,0,0);
     assert(captured.empty());
     assert(debug_calls>30);
+    assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
+    for(ULONG mode=0;mode<=4;mode++) {
+        Ap6256TraceSetDebugLevel(mode);
+        assert(Ap6256TraceInformationEnabled(TRACE_SDIO)==(mode>=3));
+    }
+    Ap6256TraceSetDebugLevel(0);
+    assert(NT_SUCCESS(Ap6256TraceInitialize()));
+    assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
+    enable(3,TRACE_SDIO);assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
+    enable(4,TRACE_POWER);assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
+    enable(4,TRACE_DRIVER);assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
+    assert(Ap6256TraceInformationEnabled(TRACE_SDIO|TRACE_DRIVER));
+    enable(4,TRACE_SDIO);assert(Ap6256TraceInformationEnabled(TRACE_SDIO));
+    fixture_irql=DISPATCH_LEVEL;assert(Ap6256TraceInformationEnabled(TRACE_SDIO));
+    fixture_irql=DISPATCH_LEVEL+1;assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
+    fixture_irql=0;Ap6256TraceCleanup();
+    assert(!Ap6256TraceInformationEnabled(TRACE_SDIO));
     puts("production TraceLogging metadata/filter/payload/lifetime cases passed");
 }
 '''

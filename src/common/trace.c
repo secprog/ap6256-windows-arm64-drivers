@@ -28,6 +28,15 @@ static BOOLEAN Ap6256TraceDebugEnabled(UCHAR Level)
         (ULONG)InterlockedCompareExchange(&Ap6256DebugLogLevel, 0, 0) >= (ULONG)(Level - 1));
 }
 
+_Use_decl_annotations_
+BOOLEAN Ap6256TraceInformationEnabled(ULONG Category)
+{
+    return (BOOLEAN)(Ap6256TraceDebugEnabled(4) ||
+        (KeGetCurrentIrql() <= DISPATCH_LEVEL &&
+         InterlockedCompareExchange(&Ap6256EtwRegistered, 0, 0) != 0 &&
+         TraceLoggingProviderEnabled(Ap6256EtwProvider, 4, Category)));
+}
+
 static ULONG Ap6256TraceDebugImportance(ULONG DebugLevel)
 {
 

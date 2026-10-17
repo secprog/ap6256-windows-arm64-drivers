@@ -14,6 +14,7 @@ spec = importlib.util.spec_from_file_location('tx', ROOT / 'tests/test-wdi-trans
 tx = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tx)
 PRE = r'''
+#define Ap6256TraceInformationEnabled(Category) TRUE
 #define WIN32_LEAN_AND_MEAN
 #define WIN32_NO_STATUS
 #define NOMINMAX

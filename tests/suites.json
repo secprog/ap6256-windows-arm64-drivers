@@ -86,6 +86,20 @@
       "optional": false
     },
     {
+      "name": "packet-performance",
+      "file": "test-packet-performance.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
+      "name": "sdio-diagnostic-costs",
+      "file": "test-sdio-diagnostic-costs.py",
+      "flags": [],
+      "output": "--output",
+      "optional": false
+    },
+    {
       "name": "wdi-transmit",
       "file": "test-wdi-transmit.py",
       "flags": [],

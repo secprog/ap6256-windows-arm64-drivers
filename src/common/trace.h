@@ -32,6 +32,8 @@ VOID Ap6256TraceLoadDebugSettings(_In_opt_ PDEVICE_OBJECT Pdo);
 _IRQL_requires_max_(DISPATCH_LEVEL)
 VOID Ap6256TraceSetDebugLevel(_In_ ULONG Level);
 _IRQL_requires_max_(DISPATCH_LEVEL)
+BOOLEAN Ap6256TraceInformationEnabled(_In_ ULONG Category);
+_IRQL_requires_max_(DISPATCH_LEVEL)
 VOID Ap6256TracePacketMessage(_In_ _Printf_format_string_ PCSTR Format, ...);
 
 _IRQL_requires_max_(PASSIVE_LEVEL)

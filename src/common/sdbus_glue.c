@@ -189,7 +189,9 @@ NTSTATUS Ap6256SdBusCmd53Mode(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         BOOLEAN bounceCached = FALSE;
         PMDL mdl;
         SIZE_T bounceSize;
-        LARGE_INTEGER submitStart, submitEnd, submitFrequency;
+        LARGE_INTEGER submitStart = {0}, submitEnd = {0}, submitFrequency = {0};
+        BOOLEAN traceStats = Ap6256TraceInformationEnabled(TRACE_SDIO | TRACE_DRIVER);
+        LONGLONG submitUs = 0;
         ULONG cacheAlign;
         ULONG mdlLength;
 
@@ -310,12 +312,12 @@ NTSTATUS Ap6256SdBusCmd53Mode(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         packet.Parameters.DeviceCommand.Mdl = mdl;
         packet.Parameters.DeviceCommand.Length = chunk;
 
-        submitStart = KeQueryPerformanceCounter(&submitFrequency);
+        if (traceStats) submitStart = KeQueryPerformanceCounter(&submitFrequency);
         status = SdBusSubmitRequest(iface->Context, &packet);
-        submitEnd = KeQueryPerformanceCounter(NULL);
+        if (traceStats) submitEnd = KeQueryPerformanceCounter(NULL);
 
-        {
-            LONGLONG us = (submitFrequency.QuadPart != 0)
+        if (traceStats) {
+            submitUs = (submitFrequency.QuadPart != 0)
                 ? (LONGLONG)((submitEnd.QuadPart - submitStart.QuadPart) * 1000000
                              / submitFrequency.QuadPart)
                 : 0;
@@ -323,26 +325,23 @@ NTSTATUS Ap6256SdBusCmd53Mode(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             if (Function == AP6256_SDIO_FUNC_DATA && Write) {
                 InterlockedIncrement64(&Ctx->Sdio.StatWrites);
                 InterlockedAdd64(&Ctx->Sdio.StatWriteBytes, (LONGLONG)chunk);
-                InterlockedAdd64(&Ctx->Sdio.StatWriteUs, us);
+                InterlockedAdd64(&Ctx->Sdio.StatWriteUs, submitUs);
             } else if (Function == AP6256_SDIO_FUNC_DATA && ByteMode) {
                 InterlockedIncrement64(&Ctx->Sdio.StatHdrReads);
-                InterlockedAdd64(&Ctx->Sdio.StatHdrReadUs, us);
+                InterlockedAdd64(&Ctx->Sdio.StatHdrReadUs, submitUs);
             } else if (Function == AP6256_SDIO_FUNC_DATA) {
                 InterlockedIncrement64(&Ctx->Sdio.StatBodyReads);
                 InterlockedAdd64(&Ctx->Sdio.StatBodyReadBytes, (LONGLONG)chunk);
-                InterlockedAdd64(&Ctx->Sdio.StatBodyReadUs, us);
+                InterlockedAdd64(&Ctx->Sdio.StatBodyReadUs, submitUs);
             } else {
                 InterlockedIncrement64(&Ctx->Sdio.StatOtherCmd53);
-                InterlockedAdd64(&Ctx->Sdio.StatOtherUs, us);
+                InterlockedAdd64(&Ctx->Sdio.StatOtherUs, submitUs);
             }
         }
-        if (!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status) && traceStats) {
             TraceDiag("CMD53 timing fn%u len=%u %s elapsed_us=%I64u isr_count=%d information=%Iu response_len=%u\n",
                       Function, chunk, blockMode ? "block" : "byte",
-                      (submitFrequency.QuadPart != 0)
-                        ? (ULONGLONG)((submitEnd.QuadPart - submitStart.QuadPart) * 1000000
-                                      / submitFrequency.QuadPart)
-                        : 0ull,
+                      (ULONGLONG)submitUs,
                       Ctx->Sdio.IsrCount,
                       packet.Information, (ULONG)packet.ResponseLength);
         }

@@ -1309,6 +1309,7 @@ static NTSTATUS Ap6256HandleGlomSuperframe(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     ULONG segmentStart = 0;
     ULONG segmentEnd = 0;
     NTSTATUS status = STATUS_SUCCESS;
+    BOOLEAN traceStats = Ap6256TraceInformationEnabled(TRACE_SDIO);
 
     if (Ctx->GlomCount == 0) return STATUS_DEVICE_PROTOCOL_ERROR;
 
@@ -1354,7 +1355,7 @@ static NTSTATUS Ap6256HandleGlomSuperframe(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             Ctx->Sdio.RxSeq = (UINT8)(sw->Sequence + 1);
             KeReleaseSpinLock(&Ctx->Sdio.TxStateLock, oldIrql);
         }
-        if (channel == SDPCM_DATA_CHANNEL) {
+        if (channel == SDPCM_DATA_CHANNEL && traceStats) {
             InterlockedIncrement64(&Ctx->Sdio.StatRxFrames);
         }
         Ap6256DispatchBcdcFrame(Ctx, channel, (PUCHAR)hw + dataOffset,
@@ -1427,6 +1428,7 @@ static VOID Ap6256FramePass(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     UINT32 sdiodBase, intstatus, newstatus;
     NTSTATUS status;
     int guard;
+    BOOLEAN traceStats = Ap6256TraceInformationEnabled(TRACE_SDIO);
 
     if (!Ctx->DatapathRunning || Ctx->Chip.SdiodCore == NULL ||
         InterlockedCompareExchange(&Ctx->FirmwareHalted, 0, 0) != 0) goto done;
@@ -1496,7 +1498,7 @@ static VOID Ap6256FramePass(_In_ PAP6256_DEVICE_CONTEXT Ctx)
         ULONG emptyPolls = 0;
 
         Ctx->RxBatching = TRUE;
-        InterlockedIncrement64(&Ctx->Sdio.StatPasses);
+        if (traceStats) InterlockedIncrement64(&Ctx->Sdio.StatPasses);
 
         for (guard = 0; guard < AP6256_RX_PASS_LIMIT && !Ctx->RxSkip; guard++) {
             PUCHAR payload;
@@ -1518,7 +1520,7 @@ static VOID Ap6256FramePass(_In_ PAP6256_DEVICE_CONTEXT Ctx)
                 if (status == STATUS_NO_MORE_ENTRIES && framesThisPass > 1 &&
                     emptyPolls < min(AP6256_RX_EMPTY_POLLS, framesThisPass - 1)) {
                     emptyPolls++;
-                    InterlockedIncrement64(&Ctx->Sdio.StatEmptyPolls);
+                    if (traceStats) InterlockedIncrement64(&Ctx->Sdio.StatEmptyPolls);
                     continue;
                 }
                 break;
@@ -1528,7 +1530,7 @@ static VOID Ap6256FramePass(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 
             switch (channel) {
             case SDPCM_DATA_CHANNEL:
-                InterlockedIncrement64(&Ctx->Sdio.StatRxFrames);
+                if (traceStats) InterlockedIncrement64(&Ctx->Sdio.StatRxFrames);
                 Ap6256DispatchBcdcFrame(Ctx, channel, payload, payloadLen);
                 break;
             case SDPCM_EVENT_CHANNEL:
@@ -1731,6 +1733,7 @@ NTSTATUS Ap6256DatapathSendSdpcm(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     KIRQL oldIrql;
     UINT8 creditDelta;
     ULONG retries = 0;
+    BOOLEAN traceStats = Ap6256TraceInformationEnabled(TRACE_SDIO);
 
     if (InterlockedCompareExchange(&Ctx->FirmwareHalted, 0, 0) != 0)
         return STATUS_DEVICE_HARDWARE_ERROR;
@@ -1810,7 +1813,7 @@ NTSTATUS Ap6256DatapathSendSdpcm(_In_ PAP6256_DEVICE_CONTEXT Ctx,
             KeAcquireSpinLock(&Ctx->Sdio.TxStateLock, &oldIrql);
             Ctx->Sdio.TxSeq = (UINT8)(Ctx->Sdio.TxSeq + 1);
             KeReleaseSpinLock(&Ctx->Sdio.TxStateLock, oldIrql);
-            InterlockedIncrement64(&Ctx->Sdio.StatTxFrames);
+            if (traceStats) InterlockedIncrement64(&Ctx->Sdio.StatTxFrames);
             break;
         }
 
@@ -1847,6 +1850,7 @@ NTSTATUS Ap6256DatapathSendGlom(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     ULONG n, i, lastEnd, transferLength;
     UCHAR savedTail[512];
     ULONG savedOffset = 0, savedLength = 0;
+    BOOLEAN traceStats = Ap6256TraceInformationEnabled(TRACE_SDIO);
     UINT8 window, seq;
     KIRQL oldIrql;
     NTSTATUS status;
@@ -1983,7 +1987,7 @@ NTSTATUS Ap6256DatapathSendGlom(_In_ PAP6256_DEVICE_CONTEXT Ctx,
         KeAcquireSpinLock(&Ctx->Sdio.TxStateLock, &oldIrql);
         Ctx->Sdio.TxSeq = (UINT8)(Ctx->Sdio.TxSeq + n);
         KeReleaseSpinLock(&Ctx->Sdio.TxStateLock, oldIrql);
-        InterlockedAdd64(&Ctx->Sdio.StatTxFrames, (LONGLONG)n);
+        if (traceStats) InterlockedAdd64(&Ctx->Sdio.StatTxFrames, (LONGLONG)n);
         *Sent = n;
     } else {
         Ap6256SdioTxFail(Ctx);

@@ -649,12 +649,18 @@ static LONGLONG Ap6256StatAverage(_In_ LONGLONG Total, _In_ LONGLONG Count)
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID Ap6256SdioTraceBusStats(_In_ PAP6256_DEVICE_CONTEXT Ctx)
 {
-    ULONGLONG now = KeQueryInterruptTime();
+    ULONGLONG now;
     ULONGLONG elapsedMs;
     LONGLONG hdrReads, hdrUs, bodyReads, bodyBytes, bodyUs;
     LONGLONG writes, writeBytes, writeUs, other, otherUs, rxFrames, txFrames;
     LONGLONG passes, emptyPolls;
     LONG isrNow, isrDelta;
+
+    if (!Ap6256TraceInformationEnabled(TRACE_SDIO)) {
+        Ctx->Sdio.StatPrintedAt = 0;
+        return;
+    }
+    now = KeQueryInterruptTime();
 
     if (Ctx->Sdio.StatPrintedAt == 0) {
         (VOID)Ap6256StatTake(&Ctx->Sdio.StatHdrReads);

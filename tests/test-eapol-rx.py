@@ -34,7 +34,8 @@ typedef NBL* PNET_BUFFER;
 static std::vector<std::string> eapol_logs;
 static ULONGLONG KeQueryInterruptTime(){return 123456;}
 static PCSTR Ap6256TalNdisStatusName(NDIS_STATUS){return "fixture";}
-static void* NdisGetDataBuffer(NBL* n,ULONG length,void*,ULONG,ULONG){unlocked();return length==n->bytes.size()?n->bytes.data():nullptr;}
+static unsigned diagnostic_mappings;
+static void* NdisGetDataBuffer(NBL* n,ULONG length,void*,ULONG,ULONG){unlocked();diagnostic_mappings++;return length==n->bytes.size()?n->bytes.data():nullptr;}
 static void metadata_trace(const char* format,...){unlocked();char buffer[512];va_list args;va_start(args,format);vsnprintf(buffer,sizeof(buffer),format,args);va_end(args);eapol_logs.emplace_back(buffer);}
 #undef Ap6256TraceEapol
 #undef Ap6256TalTraceEapolRxNbl
@@ -52,7 +53,7 @@ static void setup(Device& c){
     claims=upcalls=notifications=0;build_hook=queue_hook=claim_hook=delete_hook={};fail_build=false;
     c.TalStarted=c.TalApiOpen=c.TalPeerCreated=c.TalRxOpen=TRUE;c.RxBatching=TRUE;
     c.RxNblPool=&c;c.WdiDataPathHandle=&c;c.WdiDataApi.RxInorderDataIndication=notified;
-    indication_status=NDIS_STATUS_SUCCESS;eapol_logs.clear();
+    indication_status=NDIS_STATUS_SUCCESS;eapol_logs.clear();diagnostic_mappings=0;
 }
 static void packet(Device& c,bool eapol,UINT32 iface=0,UCHAR replay=14){
     UCHAR frame[113]={};memcpy(frame+6,a,6);frame[12]=eapol?0x88:8;frame[13]=eapol?0x8e:0;
@@ -84,6 +85,11 @@ int main(int argc,char**){
     c.TalPeerCreated=TRUE;Ap6256TalRxIndicateQueued(&c,0,"peer");assert(notifications==1 && pull(c)==1);
     setup(c);packet(c,true,99);assert(allocated.empty() && !notifications);
     setup(c);for(unsigned i=0;i<16;i++)packet(c,false);assert(notifications==1 && pull(c)==16);
+    for(unsigned batch=0;batch<1000;batch++) {
+        setup(c);for(unsigned i=0;i<16;i++)packet(c,false);
+        assert(notifications==1 && pull(c)==16 && diagnostic_mappings==0 && eapol_logs.empty());
+    }
+    puts("PASS: 16000 ordinary receive packets without diagnostic buffer mapping");
     setup(c);puts("PASS: immediate EAPOL notification, FIFO, pause/resume, stop/readiness gates, ordinary batching");
 }
 '''

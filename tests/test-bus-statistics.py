@@ -36,6 +36,8 @@ ULONGLONG StatPrintedAt=0;
 typedef Device* PAP6256_DEVICE_CONTEXT;
 static ULONGLONG clock100ns=100000000;
 static ULONGLONG KeQueryInterruptTime() { return clock100ns; }
+static BOOLEAN stats_enabled=TRUE;
+#define Ap6256TraceInformationEnabled(Category) stats_enabled
 static std::vector<std::vector<LONGLONG>> samples;
 template<class... Args> static void TraceInfo(ULONG,const char*,Args... args) {
     samples.push_back({(LONGLONG)args...});
@@ -78,6 +80,17 @@ int main() {
     d.Sdio.StatTxFrames=1;d.Sdio.StatWrites=1;d.Sdio.StatWriteUs=7000;d.Sdio.IsrCount=401;
     clock100ns+=5000*10000ull;Ap6256SdioTraceBusStats(&d);
     assert(samples.size()==2 && samples[1][0]==5000 && samples[1][13]==7 && samples[1][14]==1);
+    stats_enabled=FALSE;
+    for(auto field:fields(d)) *field=123;
+    d.Sdio.IsrCount=900;
+    clock100ns+=90000*10000ull;Ap6256SdioTraceBusStats(&d);
+    assert(d.Sdio.StatPrintedAt==0 && samples.size()==2);
+    stats_enabled=TRUE;Ap6256SdioTraceBusStats(&d);
+    for(auto field:fields(d))assert(*field==0);
+    assert(d.Sdio.StatIsrSnapshot==900 && d.Sdio.StatPrintedAt==clock100ns && samples.size()==2);
+    d.Sdio.StatTxFrames=1;d.Sdio.StatWrites=1;d.Sdio.StatWriteUs=4000;d.Sdio.IsrCount=901;
+    clock100ns+=5000*10000ull;Ap6256SdioTraceBusStats(&d);
+    assert(samples.size()==3 && samples.back()[0]==5000 && samples.back()[13]==4 && samples.back()[14]==1);
     puts("PASS: production bus-statistics startup/reset baselines, exact first window, pre-deadline retention, idle window and ISR deltas");
 }
 '''

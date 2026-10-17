@@ -453,7 +453,7 @@ NTSTATUS Ap6256WlfcEnqueue(PAP6256_DEVICE_CONTEXT Ctx,
         UINT16 slot;
         ULONG attempt, k;
         if (p->State != WlfcFree) continue;
-        RtlZeroMemory(p, sizeof(*p));
+        RtlZeroMemory(p, FIELD_OFFSET(WLFC_PACKET, Ethernet));
         RtlCopyMemory(p->Destination, Exemption == AP6256_FIPS_BCDC_TX_EXEMPT ? destination : Ethernet, 6);
         p->Fifo = (IfIndex != 0 && (p->Destination[0] & 1u)) ? 4 : map[Priority];
 
@@ -617,17 +617,16 @@ static BOOLEAN WlfcNotify(AP6256_WLFC* W)
     ULONG i;
     BOOLEAN progress = FALSE;
     KIRQL irql;
+    KeAcquireSpinLock(&W->Lock, &irql);
     for (i = 0; i < AP6256_WLFC_CAPACITY; i++) {
         WLFC_PACKET* p = &W->Packets[i];
         BOOLEAN transfer, done, transferOk, cancelled;
         AP6256_WLFC_RESULT result;
         AP6256_WLFC_CALLBACK callback;
         PVOID cookie;
-        KeAcquireSpinLock(&W->Lock, &irql);
         transfer = p->TransferReady && !p->TransferNotified;
         done = (BOOLEAN)(p->State == WlfcDone);
         if ((!transfer && !done) || p->State == WlfcWriting || p->Notifying) {
-            KeReleaseSpinLock(&W->Lock, irql);
             continue;
         }
         p->Notifying = TRUE;
@@ -653,9 +652,9 @@ static BOOLEAN WlfcNotify(AP6256_WLFC* W)
             p->Callback = NULL; p->Cookie = NULL;
             W->Used--;
         }
-        KeReleaseSpinLock(&W->Lock, irql);
         progress = TRUE;
     }
+    KeReleaseSpinLock(&W->Lock, irql);
     return progress;
 }
 
@@ -681,7 +680,7 @@ static ULONG WlfcBuild(AP6256_WLFC* W, WLFC_PACKET* P, ULONG Offset,
     PSDPCM_HW_HEADER hw = (PSDPCM_HW_HEADER)wire;
     PSDPCM_SW_HEADER sw = (PSDPCM_SW_HEADER)(wire + hdr - SDPCM_SWHDR_LEN);
     UINT32 tag = P ? P->Tag : 0;
-    RtlZeroMemory(wire, length);
+    RtlZeroMemory(wire, hdr + sizeof(BCDC_DATA_HEADER) + signals);
     hw->FrameLength = (UINT16)length;
     hw->FrameLengthInverted = (UINT16)~length;
     sw->ChannelAndFlags = SDPCM_DATA_CHANNEL;
