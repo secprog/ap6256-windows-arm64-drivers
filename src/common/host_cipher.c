@@ -5,7 +5,6 @@
  */
 
 #include "host_cipher.h"
-#include "sdio.h"
 #include <bcrypt.h>
 
 #ifndef AP6256_HOST_CIPHER_CANDIDATE
@@ -113,44 +112,4 @@ NTSTATUS Ap6256PrepareHostCiphers(PAP6256_DEVICE_CONTEXT Ctx,
     UNREFERENCED_PARAMETER(Length);
 #endif
     return STATUS_SUCCESS;
-}
-
-_Use_decl_annotations_
-NTSTATUS Ap6256VerifyHostCiphers(PAP6256_DEVICE_CONTEXT Ctx,
-    const UCHAR* Image, ULONG Length)
-{
-#if AP6256_HOST_CIPHER_CANDIDATE
-    ULONG pass;
-    NTSTATUS status;
-    if (Ctx == NULL || Image == NULL || !Ap6256HcExactChip(Ctx, Length))
-        return STATUS_REVISION_MISMATCH;
-    status = Ap6256HcHash(Image, Length, Ap6256NdOutputSha256);
-    if (!NT_SUCCESS(status)) return status;
-    for (pass = 0; pass < RTL_NUMBER_OF(Ap6256HcPatches) + RTL_NUMBER_OF(Ap6256NdPatches); ++pass) {
-        const AP6256_HC_PATCH* patch = pass < RTL_NUMBER_OF(Ap6256HcPatches) ?
-            &Ap6256HcPatches[pass] : &Ap6256NdPatches[pass - RTL_NUMBER_OF(Ap6256HcPatches)];
-        ULONG start = patch->Offset & ~3u;
-        ULONG end = (patch->Offset + patch->Length + 3u) & ~3u;
-        ULONG offset;
-        if (patch->Offset > Length || patch->Length > Length - patch->Offset ||
-            end > Length) return STATUS_REVISION_MISMATCH;
-        for (offset = start; offset < end; offset += sizeof(UINT32)) {
-            UINT32 value = 0;
-            status = Ap6256SdioReadBackplane32(Ctx, Ctx->Chip.RamBase + offset, &value);
-            if (!NT_SUCCESS(status)) return status;
-            if (!RtlEqualMemory(&value, Image + offset, sizeof(value))) {
-                TraceDiag("host-cipher relay: TCM mismatch at 0x%08X\n",
-                    Ctx->Chip.RamBase + offset);
-                return STATUS_DEVICE_DATA_ERROR;
-            }
-        }
-    }
-    TraceDiag("host-cipher experimental relay: all patch spans read back before CPU start\n");
-    return STATUS_SUCCESS;
-#else
-    UNREFERENCED_PARAMETER(Ctx);
-    UNREFERENCED_PARAMETER(Image);
-    UNREFERENCED_PARAMETER(Length);
-    return STATUS_NOT_SUPPORTED;
-#endif
 }

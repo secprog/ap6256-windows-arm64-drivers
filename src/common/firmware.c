@@ -820,39 +820,6 @@ NTSTATUS Ap6256FirmwareDownload(_In_ PAP6256_DEVICE_CONTEXT Ctx)
     status = Ap6256SdioWriteBackplane32(Ctx, lastWord, token);
     if (!NT_SUCCESS(status)) goto cleanup;
 
-    if (nativeManagementPatched) {
-        status = servicePatched ? Ap6256VerifyNativeManagementImage(Ctx, fw, fwLen) :
-            Ap6256VerifyNativeManagement(Ctx);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (pnoDelayPatched) {
-        status = Ap6256PnoVerifyInitialDelay(Ctx);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (saePatched) {
-        status = Ap6256VerifySae(Ctx, fw, fwLen);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (ftPatched) {
-        status = Ap6256VerifyFt(Ctx, fw, fwLen);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (owePatched) {
-        status = Ap6256VerifyOwe(Ctx, fw, fwLen);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (servicePatched) {
-        status = Ap6256VerifyService(Ctx, fw, fwLen);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (ftmPatched) {
-        status = Ap6256VerifyFtm(Ctx, fw, fwLen);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
-    if (hostCipherPatched) {
-        status = Ap6256VerifyHostCiphers(Ctx, fw, fwLen);
-        if (!NT_SUCCESS(status)) goto cleanup;
-    }
     status = Ap6256ChipSetActive(Ctx, resetVector);
     if (!NT_SUCCESS(status)) {
         TraceError(TRACE_FIRMWARE, "set active failed 0x%08X\n", status);

@@ -5,11 +5,8 @@
  */
 
 #include "ft_firmware.h"
-#include "sdio.h"
 #include <bcrypt.h>
-#include <firmware_image.h>
 #include "ft_patch.h"
-#include "owe_patch.h"
 typedef struct _AP6256_FT_PATCH {
     ULONG Offset, Length;
     const UCHAR* Original;
@@ -64,43 +61,5 @@ NTSTATUS Ap6256PrepareFt(PAP6256_DEVICE_CONTEXT Ctx,
         *Applied = TRUE;
         TraceDiag("FT bridge: exact download copy patched; Windows owns FT validation\n");
     }
-    return STATUS_SUCCESS;
-}
-
-_Use_decl_annotations_
-NTSTATUS Ap6256VerifyFt(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Image, ULONG Length)
-{
-    ULONG i, pass;
-    UCHAR digest[32];
-    NTSTATUS status;
-    if (Image == NULL || Ctx->Chip.ChipId != 0x4345 || Ctx->Chip.ChipRev != 9 ||
-        Ctx->Chip.RamBase != 0x198000 || Ctx->Chip.RamSize != 0xc8000 ||
-        Length != SAE_VERIFY_SIZE) return STATUS_REVISION_MISMATCH;
-    status = BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)Image, Length,
-                        digest, sizeof(digest));
-    if (!NT_SUCCESS(status)) return status;
-    if (!RtlEqualMemory(digest, SAE_VERIFY_SHA, sizeof(digest)))
-        return STATUS_DATA_ERROR;
-
-    for (pass = 0; pass <= RTL_NUMBER_OF(Ap6256FtPatches); ++pass) {
-        ULONG start, end;
-        if (pass == RTL_NUMBER_OF(Ap6256FtPatches)) {
-            start = AP6256_FT_EXTENSION_OFFSET & ~3u;
-            end = Length;
-        } else {
-            start = Ap6256FtPatches[pass].Offset & ~3u;
-            end = (Ap6256FtPatches[pass].Offset + Ap6256FtPatches[pass].Length + 3u) & ~3u;
-        }
-        for (i = start; i < end; i += sizeof(UINT32)) {
-            UINT32 value = 0;
-            NTSTATUS readStatus = Ap6256SdioReadBackplane32(Ctx, Ctx->Chip.RamBase + i, &value);
-            if (!NT_SUCCESS(readStatus)) return readStatus;
-            if (!RtlEqualMemory(&value, Image + i, sizeof(value))) {
-                TraceDiag("FT bridge: TCM verification failed at 0x%08X\n", Ctx->Chip.RamBase + i);
-                return STATUS_DEVICE_DATA_ERROR;
-            }
-        }
-    }
-    TraceDiag("FT bridge: shared SAE/FT hooks and complete reservation verified before CPU start\n");
     return STATUS_SUCCESS;
 }

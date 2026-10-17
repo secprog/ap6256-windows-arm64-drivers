@@ -5,7 +5,6 @@
  */
 
 #include "ft_firmware.h"
-#include "sdio.h"
 
 _Use_decl_annotations_
 NTSTATUS Ap6256PrepareFt(PAP6256_DEVICE_CONTEXT Ctx,
@@ -18,17 +17,7 @@ NTSTATUS Ap6256PrepareFt(PAP6256_DEVICE_CONTEXT Ctx,
     return STATUS_SUCCESS;
 }
 
-_Use_decl_annotations_
-NTSTATUS Ap6256VerifyFt(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Image, ULONG Length)
-{
-    UNREFERENCED_PARAMETER(Ctx);
-    UNREFERENCED_PARAMETER(Image);
-    UNREFERENCED_PARAMETER(Length);
-    return STATUS_NOT_SUPPORTED;
-}
-
 #include "owe_firmware.h"
-#include "sdio.h"
 
 _Use_decl_annotations_
 NTSTATUS Ap6256PrepareOwe(PAP6256_DEVICE_CONTEXT Ctx,
@@ -39,13 +28,4 @@ NTSTATUS Ap6256PrepareOwe(PAP6256_DEVICE_CONTEXT Ctx,
     UNREFERENCED_PARAMETER(Image);
     UNREFERENCED_PARAMETER(Length);
     return STATUS_SUCCESS;
-}
-
-_Use_decl_annotations_
-NTSTATUS Ap6256VerifyOwe(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Image, ULONG Length)
-{
-    UNREFERENCED_PARAMETER(Ctx);
-    UNREFERENCED_PARAMETER(Image);
-    UNREFERENCED_PARAMETER(Length);
-    return STATUS_NOT_SUPPORTED;
 }

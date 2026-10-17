@@ -9,10 +9,6 @@
 #include <bcrypt.h>
 #include "bcdc.h"
 #include "service_patch.h"
-#include "ftm_patch.h"
-#include "host_cipher_image.h"
-#define SERVICE_VERIFY_SIZE AP6256_FTM_OUTPUT_SIZE
-#define SERVICE_VERIFY_SHA AP6256_FINAL_IMAGE_SHA
 typedef struct _AP6256_SERVICE_PATCH {
     ULONG Offset, Length;
     const UCHAR* Original;
@@ -67,44 +63,6 @@ NTSTATUS Ap6256PrepareService(PAP6256_DEVICE_CONTEXT Ctx,
         *Applied = TRUE;
         TraceDiag("SERVICE adapter: exact download copy patched; native ANQP/P2PO attachment and service engines restored\n");
     }
-    return STATUS_SUCCESS;
-}
-
-_Use_decl_annotations_
-NTSTATUS Ap6256VerifyService(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Image, ULONG Length)
-{
-    ULONG i, pass;
-    UCHAR digest[32];
-    NTSTATUS status;
-    if (Image == NULL || Ctx->Chip.ChipId != 0x4345 || Ctx->Chip.ChipRev != 9 ||
-        Ctx->Chip.RamBase != 0x198000 || Ctx->Chip.RamSize != 0xc8000 ||
-        Length != SERVICE_VERIFY_SIZE) return STATUS_REVISION_MISMATCH;
-    status = BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)Image, Length,
-                        digest, sizeof(digest));
-    if (!NT_SUCCESS(status)) return status;
-    if (!RtlEqualMemory(digest, SERVICE_VERIFY_SHA, sizeof(digest)))
-        return STATUS_DATA_ERROR;
-
-    for (pass = 0; pass <= RTL_NUMBER_OF(Ap6256ServicePatches); ++pass) {
-        ULONG start, end;
-        if (pass == RTL_NUMBER_OF(Ap6256ServicePatches)) {
-            start = AP6256_SERVICE_CODE_OFFSET & ~3u;
-            end = Length;
-        } else {
-            start = Ap6256ServicePatches[pass].Offset & ~3u;
-            end = (Ap6256ServicePatches[pass].Offset + Ap6256ServicePatches[pass].Length + 3u) & ~3u;
-        }
-        for (i = start; i < end; i += sizeof(UINT32)) {
-            UINT32 value = 0;
-            NTSTATUS readStatus = Ap6256SdioReadBackplane32(Ctx, Ctx->Chip.RamBase + i, &value);
-            if (!NT_SUCCESS(readStatus)) return readStatus;
-            if (!RtlEqualMemory(&value, Image + i, sizeof(value))) {
-                TraceDiag("SERVICE adapter: TCM verification failed at 0x%08X\n", Ctx->Chip.RamBase + i);
-                return STATUS_DEVICE_DATA_ERROR;
-            }
-        }
-    }
-    TraceDiag("SERVICE adapter: service hooks over retained RRM/NLO/SAE/FT/OWE and complete reservation verified before CPU start\n");
     return STATUS_SUCCESS;
 }
 

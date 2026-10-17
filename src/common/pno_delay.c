@@ -5,7 +5,6 @@
  */
 
 #include "pno_delay.h"
-#include "sdio.h"
 #include <bcrypt.h>
 #include "pno_delay_patch.h"
 #include "native_mgmt_patch.h"
@@ -79,30 +78,5 @@ NTSTATUS Ap6256PnoPrepareInitialDelay(PAP6256_DEVICE_CONTEXT Ctx,
     if (!NT_SUCCESS(status)) return status;
     if (!RtlEqualMemory(digest, outputDigest, sizeof(digest))) return STATUS_DATA_ERROR;
     *Applied = TRUE;
-    return STATUS_SUCCESS;
-}
-
-_Use_decl_annotations_
-NTSTATUS Ap6256PnoVerifyInitialDelay(PAP6256_DEVICE_CONTEXT Ctx)
-{
-    ULONG i;
-    for (i = 0; i < RTL_NUMBER_OF(Ap6256PnoDelayPatches); ++i) {
-        const AP6256_PNO_DELAY_PATCH* p = &Ap6256PnoDelayPatches[i];
-        ULONG start = AP6256_PNO_DELAY_RAM_BASE + p->Offset;
-        ULONG address, end = start + p->Length;
-        for (address = start & ~3u; address < end; address += sizeof(UINT32)) {
-            UINT32 word = 0;
-            ULONG j;
-            NTSTATUS status = Ap6256SdioReadBackplane32(Ctx, address, &word);
-            if (!NT_SUCCESS(status)) return status;
-            for (j = 0; j < sizeof(UINT32); ++j) {
-                ULONG byteAddress = address + j;
-                if (byteAddress >= start && byteAddress < end &&
-                    (UCHAR)(word >> (8 * j)) != p->Replacement[byteAddress - start])
-                    return STATUS_DEVICE_DATA_ERROR;
-            }
-        }
-    }
-    TraceDiag("PNO independent delay: all nine TCM spans verified before CPU start\n");
     return STATUS_SUCCESS;
 }

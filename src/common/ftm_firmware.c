@@ -5,11 +5,9 @@
  */
 
 #include "ftm_firmware.h"
-#include "sdio.h"
 #include <bcrypt.h>
 #include "bcdc.h"
 #include "ftm_patch.h"
-#include "host_cipher_image.h"
 #include "ftm.h"
 typedef struct _AP6256_FTM_PATCH {
     ULONG Offset, Length;
@@ -122,43 +120,5 @@ NTSTATUS Ap6256QualifyFtm(PAP6256_DEVICE_CONTEXT Ctx)
 unavailable:
     TraceDiag("FTM: native backend unavailable (ABI 0x%08X status 0x%08X; ready length %u reply %u error %u firmware %d); capability disabled\n",
         abi,status,r.PayloadLength,r.FirmwareReply,r.FirmwareError,r.FirmwareStatus);
-    return STATUS_SUCCESS;
-}
-
-_Use_decl_annotations_
-NTSTATUS Ap6256VerifyFtm(PAP6256_DEVICE_CONTEXT Ctx, const UCHAR* Image, ULONG Length)
-{
-    ULONG i, pass;
-    UCHAR digest[32];
-    NTSTATUS status;
-    if (Image == NULL || Ctx->Chip.ChipId != 0x4345 || Ctx->Chip.ChipRev != 9 ||
-        Ctx->Chip.RamBase != 0x198000 || Ctx->Chip.RamSize != 0xc8000 ||
-        Length != AP6256_FTM_OUTPUT_SIZE) return STATUS_REVISION_MISMATCH;
-    status = BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)Image, Length,
-                        digest, sizeof(digest));
-    if (!NT_SUCCESS(status)) return status;
-    if (!RtlEqualMemory(digest, AP6256_FINAL_IMAGE_SHA, sizeof(digest)))
-        return STATUS_DATA_ERROR;
-
-    for (pass = 0; pass <= RTL_NUMBER_OF(Ap6256FtmPatches); ++pass) {
-        ULONG start, end;
-        if (pass == RTL_NUMBER_OF(Ap6256FtmPatches)) {
-            start = AP6256_FTM_CODE_OFFSET & ~3u;
-            end = Length;
-        } else {
-            start = Ap6256FtmPatches[pass].Offset & ~3u;
-            end = (Ap6256FtmPatches[pass].Offset + Ap6256FtmPatches[pass].Length + 3u) & ~3u;
-        }
-        for (i = start; i < end; i += sizeof(UINT32)) {
-            UINT32 value = 0;
-            NTSTATUS readStatus = Ap6256SdioReadBackplane32(Ctx, Ctx->Chip.RamBase + i, &value);
-            if (!NT_SUCCESS(readStatus)) return readStatus;
-            if (!RtlEqualMemory(&value, Image + i, sizeof(value))) {
-                TraceDiag("FTM adapter: TCM verification failed at 0x%08X\n", Ctx->Chip.RamBase + i);
-                return STATUS_DEVICE_DATA_ERROR;
-            }
-        }
-    }
-    TraceDiag("FTM adapter: FTM hooks over retained RRM/NLO/SAE/FT/OWE/service cleanup and complete reservation verified before CPU start\n");
     return STATUS_SUCCESS;
 }

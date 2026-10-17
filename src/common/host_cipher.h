@@ -10,7 +10,3 @@
 _IRQL_requires_max_(PASSIVE_LEVEL)
 NTSTATUS Ap6256PrepareHostCiphers(_In_ PAP6256_DEVICE_CONTEXT Ctx,
     _Inout_ PUCHAR* Image, _Inout_ PULONG Length, _Out_ BOOLEAN* Applied);
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
-NTSTATUS Ap6256VerifyHostCiphers(_In_ PAP6256_DEVICE_CONTEXT Ctx,
-    _In_reads_bytes_(Length) const UCHAR* Image, _In_ ULONG Length);
